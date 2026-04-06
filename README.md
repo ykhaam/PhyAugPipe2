@@ -95,6 +95,26 @@ python scripts/run_cot_stepwise.py \
 
 ---
 
+
+## CPU에서 테스트하기
+
+가능합니다. 다만 속도가 매우 느릴 수 있어서 먼저 샘플/프레임 수를 줄여 확인하세요.
+
+```bash
+python scripts/run_cot_stepwise.py \
+  --step 1 \
+  --subset_csv data/subsets/local_subset.csv \
+  --output_jsonl outputs/steps/step1_parse_cpu.jsonl \
+  --device cpu \
+  --max_samples 5 \
+  --num_frames 4 \
+  --max_new_tokens 256
+```
+
+일괄 실행도 동일하게 `--device cpu`를 주면 됩니다.
+
+---
+
 ## 5) 참고: 기존 일괄 실행
 
 ```bash

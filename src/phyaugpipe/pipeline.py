@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import torch
 from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
@@ -18,18 +19,38 @@ class PipelineConfig:
     max_new_tokens: int = 512
     num_frames: int = 8
     prompt_template_path: str = "prompts/cot_filtering_prompt.txt"
-    device_map: str = "auto"
+    device: str = "auto"  # auto | cpu | cuda
 
 
 class CoTFilteringPipeline:
     def __init__(self, config: Optional[PipelineConfig] = None):
         self.config = config or PipelineConfig()
         self.processor = AutoProcessor.from_pretrained(self.config.model_name, trust_remote_code=True)
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            self.config.model_name,
-            trust_remote_code=True,
-            device_map=self.config.device_map,
-        )
+
+        if self.config.device == "cpu":
+            self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                self.config.model_name,
+                trust_remote_code=True,
+                torch_dtype=torch.float32,
+            )
+            self.model.to("cpu")
+            self.input_device = torch.device("cpu")
+        elif self.config.device == "cuda":
+            self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                self.config.model_name,
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16,
+            )
+            self.model.to("cuda")
+            self.input_device = torch.device("cuda")
+        else:
+            self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                self.config.model_name,
+                trust_remote_code=True,
+                device_map="auto",
+            )
+            self.input_device = self.model.device
+
         self.template = Path(self.config.prompt_template_path).read_text(encoding="utf-8")
 
     @staticmethod
@@ -50,7 +71,9 @@ class CoTFilteringPipeline:
             videos=video_inputs,
             padding=True,
             return_tensors="pt",
-        ).to(self.model.device)
+        )
+        if self.config.device in {"cpu", "cuda"}:
+            inputs = inputs.to(self.input_device)
 
         generated_ids = self.model.generate(**inputs, max_new_tokens=self.config.max_new_tokens)
         generated_ids_trimmed = [
@@ -135,7 +158,6 @@ class CoTFilteringPipeline:
         return str(parsed.get("extended", ""))
 
     def run_one(self, sample: SampleRecord) -> CoTResult:
-        # Backward-compatible all-in-one path.
         messages = self._messages_with_frames(self.template + "\nReturn strict JSON now.", sample)
         output_text = self._generate(messages)
         parsed = self._extract_json(output_text)

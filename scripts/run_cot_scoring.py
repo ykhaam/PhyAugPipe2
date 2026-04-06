@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num_frames", type=int, default=8)
     p.add_argument("--max_new_tokens", type=int, default=512)
     p.add_argument("--prompt_template", default="prompts/cot_filtering_prompt.txt")
+    p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     p.add_argument("--max_samples", type=int, default=0, help="0 means all rows")
     return p.parse_args()
 
@@ -38,6 +39,7 @@ def main() -> None:
             num_frames=args.num_frames,
             max_new_tokens=args.max_new_tokens,
             prompt_template_path=args.prompt_template,
+            device=args.device,
         )
     )
 

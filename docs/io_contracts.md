@@ -84,6 +84,7 @@
 ### Input
 - `--subset_csv`: canonical pair CSV
 - `--step 1`
+- `--device`: `auto|cpu|cuda` (CPU 점검 시 `cpu`)
 
 ### Output JSONL (`--output_jsonl`)
 ```json
@@ -180,7 +181,7 @@
 
 ### Input
 - `--subset_csv`: canonical pair CSV
-- model/runtime args: `--model_name`, `--num_frames`, `--max_new_tokens`
+- model/runtime args: `--model_name`, `--num_frames`, `--max_new_tokens`, `--device`
 
 ### Outputs
 1. `--output_csv`
