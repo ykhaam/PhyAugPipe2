@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import os
+import sys
+import types
+from enum import Enum
 
 os.environ.setdefault("TRANSFORMERS_NO_TORCHVISION", "1")
 
@@ -23,6 +26,36 @@ class PipelineConfig:
     prompt_template_path: str = "prompts/cot_filtering_prompt.txt"
     device: str = "auto"  # auto | cpu | cuda
 
+
+
+
+def _ensure_torchvision_stub() -> None:
+    """Provide a minimal torchvision stub when installed torchvision is broken."""
+    try:
+        import torchvision  # noqa: F401
+        return
+    except Exception:
+        pass
+
+    if "torchvision" in sys.modules:
+        return
+
+    tv = types.ModuleType("torchvision")
+    transforms = types.ModuleType("torchvision.transforms")
+
+    class InterpolationMode(Enum):
+        NEAREST = 0
+        BILINEAR = 2
+        BICUBIC = 3
+        LANCZOS = 1
+        HAMMING = 4
+        BOX = 5
+
+    transforms.InterpolationMode = InterpolationMode
+    tv.transforms = transforms
+
+    sys.modules["torchvision"] = tv
+    sys.modules["torchvision.transforms"] = transforms
 
 def _process_vision_info(messages: list[dict[str, Any]]) -> tuple[list[Any], list[Any]]:
     """
@@ -43,6 +76,8 @@ def _process_vision_info(messages: list[dict[str, Any]]) -> tuple[list[Any], lis
 class CoTFilteringPipeline:
     def __init__(self, config: Optional[PipelineConfig] = None):
         self.config = config or PipelineConfig()
+
+        _ensure_torchvision_stub()
 
         try:
             from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
