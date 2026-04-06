@@ -16,6 +16,15 @@ export PYTHONPATH=src
 
 `sample_id, original_prompt, video_path` 컬럼을 갖는 CSV가 필요합니다.
 
+## 모델 설정 (중요)
+
+기본 모델은 `Qwen/Qwen2.5-VL-3B-Instruct` 입니다.
+- 논문 대비 **더 작은 3B급 모델**로 재현/디버깅을 쉽게 하기 위한 기본값입니다.
+- 영상 프레임 입력이 필요하므로 일반 텍스트 모델(`Qwen2.5-3B-Instruct`)이 아니라 **VL(vision-language) 변형**을 사용합니다.
+- 더 큰 모델을 쓰고 싶으면 `--model_name`으로 교체하세요.
+
+---
+
 ## I/O 형식 명세
 
 각 스크립트/단계별 입력·출력 포맷은 `docs/io_contracts.md`에 정리했습니다.

@@ -2,6 +2,13 @@
 
 이 문서는 각 스크립트(단계)의 입력/출력 형식을 명시합니다.
 
+## Model Default
+
+- default: `Qwen/Qwen2.5-VL-3B-Instruct` (3B급 VL 모델)
+- note: video+frame 입력이 필요해 텍스트 전용 3B 모델은 기본 파이프라인에서 사용할 수 없음
+
+---
+
 ## Common Canonical Pair Record
 
 모든 CoT 단계에서 공통으로 사용하는 최소 레코드.
