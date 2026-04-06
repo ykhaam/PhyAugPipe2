@@ -150,10 +150,17 @@ class CoTFilteringPipeline:
         )[0]
         return output_text
 
-    def _messages_with_frames(self, instruction: str, sample: SampleRecord) -> list[dict[str, Any]]:
+    def _messages_with_frames(
+        self,
+        instruction: str,
+        sample: SampleRecord,
+        extra_payload: Optional[dict[str, Any]] = None,
+    ) -> list[dict[str, Any]]:
         frames = sample_video_frames(sample.video_path, num_frames=self.config.num_frames)
         content = [{"type": "text", "text": instruction}]
         content.append({"type": "text", "text": f"Original prompt: {sample.original_prompt}"})
+        if extra_payload is not None:
+            content.append({"type": "text", "text": json.dumps(extra_payload, ensure_ascii=False)})
         for frame in frames:
             content.append({"type": "image", "image": frame})
         return [{"role": "user", "content": content}]
@@ -165,58 +172,61 @@ class CoTFilteringPipeline:
         ]
         return [{"role": "user", "content": content}]
 
+
+    def _step_instruction(self, step_idx: int, output_desc: str) -> str:
+        return (
+            f"{self.template}\n\n"
+            f"Execute ONLY Step {step_idx}. "
+            f"Output JSON only. {output_desc}"
+        )
+
     def run_step1_parse(self, sample: SampleRecord) -> Dict[str, Any]:
-        instruction = (
-            "Step1 Element Parsing only. Return JSON with key 'parse' containing: "
-            "entities(list), actions(list), forces(list), outcomes(list). "
-            "Do not speculate beyond prompt+frames."
+        instruction = self._step_instruction(
+            1,
+            "Return JSON with key 'parse' containing entities(list), actions(list), forces(list), outcomes(list). Do not speculate beyond prompt+frames.",
         )
         out = self._generate(self._messages_with_frames(instruction, sample))
         parsed = self._extract_json(out)
         return parsed.get("parse", {})
 
     def run_step2_vision_check(self, sample: SampleRecord, parse_obj: Dict[str, Any]) -> Dict[str, Any]:
-        instruction = (
-            "Step2 Vision Checking only. Given original prompt, frames, and current parse, "
-            "remove hallucinations and add clearly visible missing items. "
-            "Return JSON with key 'parse'."
+        instruction = self._step_instruction(
+            2,
+            "Given current parse, remove hallucinations and add clearly visible missing items. Return JSON with key 'parse'.",
         )
-        base_messages = self._messages_with_frames(instruction, sample)
-        base_messages[0]["content"].append(
-            {"type": "text", "text": f"Current parse: {json.dumps(parse_obj, ensure_ascii=False)}"}
+        out = self._generate(
+            self._messages_with_frames(instruction, sample, extra_payload={"current_parse": parse_obj})
         )
-        out = self._generate(base_messages)
         parsed = self._extract_json(out)
         return parsed.get("parse", parse_obj)
 
     def run_step3_reason(self, sample: SampleRecord, parse_obj: Dict[str, Any]) -> str:
-        instruction = (
-            "Step3 Physics Reasoning only. Using original prompt and parse, explain concise causal "
-            "physics interactions and outcomes. Return JSON with key 'reason'."
+        instruction = self._step_instruction(
+            3,
+            "Using parse and frame evidence, explain concise causal physics interactions and outcomes. Return JSON with key 'reason'.",
         )
-        payload = {"original": sample.original_prompt, "parse": parse_obj}
-        out = self._generate(self._messages_text_only(instruction, payload))
+        payload = {"parse": parse_obj}
+        out = self._generate(self._messages_with_frames(instruction, sample, extra_payload=payload))
         parsed = self._extract_json(out)
         return str(parsed.get("reason", ""))
 
-    def run_step4_score(self, parse_obj: Dict[str, Any], reason: str) -> float:
-        instruction = (
-            "Step4 Data Scoring only. Score physics_richness in [0,1] using entity interactions, explicit "
-            "forces/outcomes, causal clarity, and penalties (camera motion/stylization/static aftermath). "
-            "Return JSON with key 'physics_richness'."
+    def run_step4_score(self, sample: SampleRecord, parse_obj: Dict[str, Any], reason: str) -> float:
+        instruction = self._step_instruction(
+            4,
+            "Score physics_richness in [0,1] using parse+reason and frame evidence, including camera motion/stylization/static-aftermath penalties. Return JSON with key 'physics_richness'.",
         )
         payload = {"parse": parse_obj, "reason": reason}
-        out = self._generate(self._messages_text_only(instruction, payload))
+        out = self._generate(self._messages_with_frames(instruction, sample, extra_payload=payload))
         parsed = self._extract_json(out)
         return float(parsed.get("physics_richness", 0.0))
 
     def run_step5_extend(self, sample: SampleRecord, parse_obj: Dict[str, Any], reason: str) -> str:
-        instruction = (
-            "Step5 Prompt Extending only. Extend original prompt with causal physical details based on reason. "
-            "Do not add new entities/forces/sensory descriptions. <=100 words. Return JSON with key 'extended'."
+        instruction = self._step_instruction(
+            5,
+            "Extend original prompt with causal physical details based on reason and frame evidence. Do not add new entities/forces/sensory descriptions. <=100 words. Return JSON with key 'extended'.",
         )
-        payload = {"original": sample.original_prompt, "parse": parse_obj, "reason": reason}
-        out = self._generate(self._messages_text_only(instruction, payload))
+        payload = {"parse": parse_obj, "reason": reason}
+        out = self._generate(self._messages_with_frames(instruction, sample, extra_payload=payload))
         parsed = self._extract_json(out)
         return str(parsed.get("extended", ""))
 

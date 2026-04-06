@@ -138,6 +138,9 @@
 
 ## 4) `scripts/run_cot_stepwise.py`
 
+- Note: Step1~5 모두 프레임 증거를 사용하며, Stepwise 경로도 CoT 템플릿 기반 규칙을 따릅니다.
+
+
 ## Step 1 (Element Parsing)
 ### Input
 - `--subset_csv`: canonical pair CSV

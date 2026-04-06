@@ -116,7 +116,7 @@ def main() -> None:
                     prev_row = prev.get(sid, {})
                     parse_obj = prev_row.get("parse", {})
                     reason = prev_row.get("reason", "")
-                    score = pipe.run_step4_score(parse_obj, reason)
+                    score = pipe.run_step4_score(sample, parse_obj, reason)
                     payload = {**base, "parse": parse_obj, "reason": reason, "physics_richness": score}
                 else:
                     prev_row = prev.get(sid, {})

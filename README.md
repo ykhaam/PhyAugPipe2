@@ -120,6 +120,7 @@ python scripts/build_local_pairs_csv.py \
 ## 4) 단계별 실행 (강력 권장)
 
 한 번에 돌리지 않고, 각 단계 결과를 확인하면서 디버깅합니다.
+- Stepwise 모드에서도 Step1~5 모두 공통 CoT 템플릿을 기반으로 동작하며, Step3~5도 프레임 증거를 함께 사용합니다.
 
 ```bash
 # Step 1: Element Parsing
