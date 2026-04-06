@@ -31,7 +31,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--include_meta", action="store_true", default=False)
     p.add_argument("--max_count", type=int, default=0)
     p.add_argument("--sanitize_text_fields", action="store_true", default=False)
-    p.add_argument("--drop_corrupted", action="store_true", default=False)
+    p.add_argument("--drop_corrupted", action="store_true", default=True)
+    p.add_argument("--keep_corrupted", action="store_true", default=False)
     p.add_argument("--sample_mode", choices=["top", "random"], default="top")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
@@ -139,9 +140,15 @@ def _normalize_text(x: Any) -> Any:
 
 
 def _looks_corrupted(row: dict[str, Any]) -> bool:
-    sentinel = "sample_id,original_prompt,video_path"
+    sentinels = [
+        "sample_id,original_prompt,video_path",
+        "sample_id,original_prompt,video_path,width,height",
+    ]
     for v in row.values():
-        if isinstance(v, str) and sentinel in v:
+        if not isinstance(v, str):
+            continue
+        low = v.lower()
+        if any(s in low for s in sentinels):
             return True
     return False
 
@@ -149,12 +156,16 @@ def main() -> None:
     args = parse_args()
     if args.prompt_key != "captions" and not args.allow_non_caption_prompt:
         raise ValueError("Use captions as prompt_key by default. Pass --allow_non_caption_prompt to override.")
+    if args.keep_corrupted:
+        args.drop_corrupted = False
+
     rows = _read_json_records(args.metadata_json)
     if not rows:
         raise ValueError(f"No valid records found in metadata json: {args.metadata_json}")
 
     root = Path(args.video_root)
     out_rows = []
+    dropped_corrupted = 0
 
     for row in rows:
         if args.prompt_key not in row or args.video_name_key not in row:
@@ -177,6 +188,7 @@ def main() -> None:
                 rec[k] = _normalize_text(v)
 
         if args.drop_corrupted and _looks_corrupted(rec):
+            dropped_corrupted += 1
             continue
 
         out_rows.append(rec)
@@ -191,7 +203,7 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)
 
-    print(f"raw_records={len(rows)} usable_pairs={len(out_rows)} final_rows={len(df)}")
+    print(f"raw_records={len(rows)} usable_pairs={len(out_rows)} final_rows={len(df)} dropped_corrupted={dropped_corrupted}")
     print(f"saved: {out_path}")
 
 
