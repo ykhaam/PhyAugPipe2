@@ -32,6 +32,25 @@ export PYTHONPATH=src
 
 ---
 
+## WISA metadata.json 파싱
+
+네가 준 형태의 `metadata.json`(중첩 `physical_annotation` 포함)에서 바로 pair CSV를 만들 수 있습니다.
+비정상 형태(예: `[...] , [...]`처럼 배열이 이어붙은 JSON)도 파서가 최대한 복구합니다.
+
+```bash
+python scripts/build_wisa_pairs_from_metadata_json.py \
+  --metadata_json /path/to/metadata.json \
+  --video_root /path/to/wisa/videos \
+  --output_csv data/subsets/wisa_from_meta.csv \
+  --require_local_video \
+  --include_meta \
+  --dedup_by_video_name
+```
+
+출력은 canonical 컬럼(`sample_id, original_prompt, video_path`) + 선택 메타컬럼입니다.
+
+---
+
 ## 3) 메타데이터 없이 로컬 video+text로 subset 생성 (빠른 디버깅용)
 
 ### 옵션 1: manifest CSV가 있는 경우

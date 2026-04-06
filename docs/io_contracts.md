@@ -85,6 +85,30 @@
 
 ---
 
+## 3-B) `scripts/build_wisa_pairs_from_metadata_json.py`
+
+### Input
+- `--metadata_json`: WISA metadata JSON 파일
+- `--video_root`: 로컬 비디오 루트
+- `--output_csv`: 출력 CSV
+- optional:
+  - `--prompt_key` (default: `captions`)
+  - `--video_name_key` (default: `video_name`)
+  - `--require_local_video`
+  - `--include_meta` (width/fps/label/physical_* 컬럼 확장)
+  - `--dedup_by_video_name`
+  - `--max_count`, `--sample_mode`, `--seed`
+
+### Output
+- canonical pair CSV
+  - required columns: `sample_id, original_prompt, video_path`
+  - optional columns: `width,height,fps,duration,motion_score,...,physical_phys_law,...`
+
+### Robustness
+- 정상 JSON list뿐 아니라 `[...] , [...]`처럼 이어붙은 malformed 형태도 순차 파싱으로 병합 시도
+
+---
+
 ## 4) `scripts/run_cot_stepwise.py`
 
 ## Step 1 (Element Parsing)
