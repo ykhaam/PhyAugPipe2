@@ -109,6 +109,28 @@
 
 ---
 
+## 3-C) `scripts/filter_wisa_metadata_by_videos.py`
+
+### Input
+- `--metadata_json`: 원본 metadata JSON
+- `--video_folder`: 실제 비디오 파일이 있는 폴더 (예: `0.zip` 해제 폴더)
+- `--output_json`: 필터된 metadata JSON
+- optional:
+  - `--video_name_key` (default: `video_name`)
+  - `--recursive` (하위 폴더 재귀 탐색)
+
+### Matching Rule
+- metadata의 `video_name`과 폴더 파일명을 둘 다 비교
+- 확장자 유무 모두 허용
+  - `abc.mp4` (metadata) ↔ `abc` (file) 매칭
+  - `abc` (metadata) ↔ `abc.mp4` (file) 매칭
+
+### Output
+- 입력 metadata와 동일한 객체 구조를 유지한 JSON list
+- 단, `video_folder`에 실제 존재하는 비디오에 해당하는 row만 포함
+
+---
+
 ## 4) `scripts/run_cot_stepwise.py`
 
 ## Step 1 (Element Parsing)

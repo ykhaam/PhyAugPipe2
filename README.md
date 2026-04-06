@@ -32,6 +32,22 @@ export PYTHONPATH=src
 
 ---
 
+## video_folder 기준 metadata subset 만들기 (0.zip 전용 등)
+
+압축 해제한 특정 폴더(예: `0.zip`만 풀어둔 폴더)에 실제 존재하는 비디오들만 남겨 metadata JSON subset을 만들 수 있습니다.
+
+```bash
+python scripts/filter_wisa_metadata_by_videos.py \
+  --metadata_json /path/to/metadata.json \
+  --video_folder /path/to/0_zip_videos \
+  --output_json data/subsets/metadata_only_0zip.json
+```
+
+- `video_name`이 `xxx.mp4`여도, 폴더에 `xxx`(확장자 없음) 파일이 있으면 매칭됩니다.
+- 반대로 폴더 파일이 `xxx.mp4`이고 metadata가 `xxx`여도 매칭됩니다.
+
+---
+
 ## WISA metadata.json 파싱
 
 네가 준 형태의 `metadata.json`(중첩 `physical_annotation` 포함)에서 바로 pair CSV를 만들 수 있습니다.
