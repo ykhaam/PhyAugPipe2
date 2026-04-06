@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import os
+
+os.environ.setdefault("TRANSFORMERS_NO_TORCHVISION", "1")
+
 import torch
-from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
 from .schemas import CoTResult, ParsedElements, SampleRecord
 from .video_utils import sample_video_frames
@@ -40,6 +43,16 @@ def _process_vision_info(messages: list[dict[str, Any]]) -> tuple[list[Any], lis
 class CoTFilteringPipeline:
     def __init__(self, config: Optional[PipelineConfig] = None):
         self.config = config or PipelineConfig()
+
+        try:
+            from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to import transformers vision stack. "
+                "Set TRANSFORMERS_NO_TORCHVISION=1 and ensure torch/torchvision are compatible, "
+                "or reinstall requirements."
+            ) from e
+
         self.processor = AutoProcessor.from_pretrained(self.config.model_name, trust_remote_code=True)
 
         if self.config.device == "cpu":

@@ -21,6 +21,7 @@ export PYTHONPATH=src  # (옵션)
 
 - `RuntimeError: operator torchvision::nms does not exist`
   - 이 오류는 보통 `torch`/`torchvision` 버전 불일치에서 발생합니다.
+  - 우선 `export TRANSFORMERS_NO_TORCHVISION=1` 후 재실행해 보세요.
   - 메타데이터 스크립트는 lazy import + 경량 비전 입력 처리로 import 단계 크래시를 피하도록 수정했습니다.
   - 현재 파이프라인은 `qwen_vl_utils`를 직접 쓰지 않으며, `transformers` processor만으로 image/video payload를 구성합니다.
 
