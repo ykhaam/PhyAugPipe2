@@ -70,10 +70,14 @@ python scripts/build_wisa_pairs_from_metadata_json.py \
   --output_csv data/subsets/wisa_from_meta.csv \
   --require_local_video \
   --include_meta \
-  --dedup_by_video_name
+  --dedup_by_video_name \
+  --sanitize_text_fields \
+  --drop_corrupted
 ```
 
 출력은 canonical 컬럼(`sample_id, original_prompt, video_path`) + 선택 메타컬럼입니다.
+- 줄바꿈이 많은 텍스트(`captions`, `physical_q4`)는 CSV에서 멀티라인 셀로 보이는 것이 정상입니다.
+- 만약 셀 안에 `sample_id,original_prompt,video_path` 같은 헤더 문자열이 섞여 있으면 `--drop_corrupted`로 제거하세요.
 
 ---
 

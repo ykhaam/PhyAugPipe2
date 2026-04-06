@@ -29,6 +29,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--require_local_video", action="store_true", default=False)
     p.add_argument("--include_meta", action="store_true", default=False)
     p.add_argument("--max_count", type=int, default=0)
+    p.add_argument("--sanitize_text_fields", action="store_true", default=False)
+    p.add_argument("--drop_corrupted", action="store_true", default=False)
     p.add_argument("--sample_mode", choices=["top", "random"], default="top")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
@@ -100,6 +102,21 @@ def _flatten_row(row: dict[str, Any], include_meta: bool) -> dict[str, Any]:
     return base
 
 
+
+
+def _normalize_text(x: Any) -> Any:
+    if not isinstance(x, str):
+        return x
+    return x.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def _looks_corrupted(row: dict[str, Any]) -> bool:
+    sentinel = "sample_id,original_prompt,video_path"
+    for v in row.values():
+        if isinstance(v, str) and sentinel in v:
+            return True
+    return False
+
 def main() -> None:
     args = parse_args()
     rows = _read_json_records(args.metadata_json)
@@ -119,11 +136,19 @@ def main() -> None:
             continue
 
         rec = {
-            "sample_id": video_name,
-            "original_prompt": prompt,
+            "sample_id": _normalize_text(video_name) if args.sanitize_text_fields else video_name,
+            "original_prompt": _normalize_text(prompt) if args.sanitize_text_fields else prompt,
             "video_path": video_path,
         }
         rec.update(_flatten_row(row, include_meta=args.include_meta))
+
+        if args.sanitize_text_fields:
+            for k, v in list(rec.items()):
+                rec[k] = _normalize_text(v)
+
+        if args.drop_corrupted and _looks_corrupted(rec):
+            continue
+
         out_rows.append(rec)
 
     df = pd.DataFrame(out_rows)

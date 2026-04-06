@@ -97,6 +97,8 @@
   - `--require_local_video`
   - `--include_meta` (width/fps/label/physical_* 컬럼 확장)
   - `--dedup_by_video_name`
+  - `--sanitize_text_fields` (CRLF 정규화/trim)
+  - `--drop_corrupted` (헤더 오염 문자열 포함 row 제거)
   - `--max_count`, `--sample_mode`, `--seed`
 
 ### Output
@@ -106,6 +108,8 @@
 
 ### Robustness
 - 정상 JSON list뿐 아니라 `[...] , [...]`처럼 이어붙은 malformed 형태도 순차 파싱으로 병합 시도
+- 멀티라인 텍스트는 CSV 셀 내 줄바꿈으로 저장되며 정상 동작
+- `--drop_corrupted` 사용 시 헤더 문자열 오염 row 제거
 
 ---
 
