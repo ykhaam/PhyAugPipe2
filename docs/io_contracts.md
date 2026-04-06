@@ -89,7 +89,7 @@
 
 ### Input
 - `--metadata_json`: WISA metadata JSON 파일
-- `--video_root`: 로컬 비디오 루트
+- `--video_root`: 로컬 비디오 루트 (`--prompt_only`면 생략 가능)
 - `--output_csv`: 출력 CSV
 - optional:
   - `--prompt_key` (default: `captions`)
@@ -103,7 +103,7 @@
 
 ### Output
 - canonical pair CSV
-  - required columns: `sample_id, original_prompt, video_path`
+  - required columns: `sample_id, original_prompt` (`--prompt_only` 미사용 시 `video_path` 포함)
   - optional columns: `width,height,fps,duration,motion_score,...,physical_phys_law,...,physical_quantify_n0,physical_quantify_n1,physical_quantify_n2,physical_time_min_s,physical_time_max_s,physical_temp_min_c,physical_temp_max_c,physical_density_range_count,physical_q3_bool`
 
 ### Robustness

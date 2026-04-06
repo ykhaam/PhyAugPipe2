@@ -21,8 +21,9 @@ from phyaugpipe.panda70m_io import sample_rows
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build canonical pair CSV from WISA-80K metadata.json")
     p.add_argument("--metadata_json", required=True)
-    p.add_argument("--video_root", required=True)
+    p.add_argument("--video_root", default="")
     p.add_argument("--output_csv", required=True)
+    p.add_argument("--prompt_only", action="store_true", default=False)
     p.add_argument("--prompt_key", default="captions")
     p.add_argument("--video_name_key", default="video_name")
     p.add_argument("--dedup_by_video_name", action="store_true", default=False)
@@ -146,11 +147,13 @@ def _looks_corrupted(row: dict[str, Any]) -> bool:
 
 def main() -> None:
     args = parse_args()
+    if not args.prompt_only and not args.video_root:
+        raise ValueError("--video_root is required unless --prompt_only is set")
     rows = _read_json_records(args.metadata_json)
     if not rows:
         raise ValueError(f"No valid records found in metadata json: {args.metadata_json}")
 
-    root = Path(args.video_root)
+    root = Path(args.video_root) if args.video_root else None
     out_rows = []
 
     for row in rows:
@@ -158,15 +161,16 @@ def main() -> None:
             continue
         video_name = str(row[args.video_name_key])
         prompt = str(row[args.prompt_key])
-        video_path = str(root / video_name)
-        if args.require_local_video and not Path(video_path).exists():
+        video_path = "" if args.prompt_only else str(root / video_name)
+        if (not args.prompt_only) and args.require_local_video and not Path(video_path).exists():
             continue
 
         rec = {
             "sample_id": _normalize_text(video_name) if args.sanitize_text_fields else video_name,
             "original_prompt": _normalize_text(prompt) if args.sanitize_text_fields else prompt,
-            "video_path": video_path,
         }
+        if not args.prompt_only:
+            rec["video_path"] = video_path
         rec.update(_flatten_row(row, include_meta=args.include_meta))
 
         if args.sanitize_text_fields:

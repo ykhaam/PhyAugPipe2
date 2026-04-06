@@ -82,6 +82,15 @@ python scripts/build_wisa_pairs_from_metadata_json.py \
 - 만약 셀 안에 `sample_id,original_prompt,video_path` 같은 헤더 문자열이 섞여 있으면 `--drop_corrupted`로 제거하세요.
 - `--include_meta`를 주면 `physical_quantify_n0/n1/n2`와 파생 수치(`physical_time_min_s`, `physical_time_max_s`, `physical_temp_min_c`, `physical_temp_max_c`, `physical_density_range_count`, `physical_q3_bool`)도 함께 저장합니다.
 
+
+프롬프트만 먼저 뽑고 싶으면:
+```bash
+python scripts/build_wisa_pairs_from_metadata_json.py \
+  --metadata_json /path/to/metadata.json \
+  --output_csv data/subsets/wisa_prompt_only.csv \
+  --prompt_only
+```
+
 ---
 
 ## 3) 메타데이터 없이 로컬 video+text로 subset 생성 (빠른 디버깅용)
