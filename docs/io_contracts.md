@@ -92,7 +92,8 @@
 - `--video_root`: 로컬 비디오 루트
 - `--output_csv`: 출력 CSV
 - optional:
-  - `--prompt_key` (default: `captions`)
+  - `--prompt_key` (default: `captions`, 권장)
+  - `--allow_non_caption_prompt` (기본 차단 해제용)
   - `--video_name_key` (default: `video_name`)
   - `--require_local_video`
   - `--include_meta` (width/fps/label/physical_* 컬럼 확장)

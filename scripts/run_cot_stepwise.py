@@ -71,6 +71,7 @@ def _record_base(row: dict) -> dict:
 def main() -> None:
     args = parse_args()
     df = _load_subset(args.subset_csv, args.max_samples)
+    print("[INFO] Using only `original_prompt` as model prompt. Metadata columns are not concatenated into the prompt.")
 
     prev = None
     if args.step >= 2:

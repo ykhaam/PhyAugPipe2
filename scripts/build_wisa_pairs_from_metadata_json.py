@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--video_root", required=True)
     p.add_argument("--output_csv", required=True)
     p.add_argument("--prompt_key", default="captions")
+    p.add_argument("--allow_non_caption_prompt", action="store_true", default=False)
     p.add_argument("--video_name_key", default="video_name")
     p.add_argument("--dedup_by_video_name", action="store_true", default=False)
     p.add_argument("--require_local_video", action="store_true", default=False)
@@ -146,6 +147,8 @@ def _looks_corrupted(row: dict[str, Any]) -> bool:
 
 def main() -> None:
     args = parse_args()
+    if args.prompt_key != "captions" and not args.allow_non_caption_prompt:
+        raise ValueError("Use captions as prompt_key by default. Pass --allow_non_caption_prompt to override.")
     rows = _read_json_records(args.metadata_json)
     if not rows:
         raise ValueError(f"No valid records found in metadata json: {args.metadata_json}")

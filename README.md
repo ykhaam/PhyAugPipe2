@@ -79,6 +79,7 @@ python scripts/build_wisa_pairs_from_metadata_json.py \
 
 출력은 canonical 컬럼(`sample_id, original_prompt, video_path`) + 선택 메타컬럼입니다.
 - **video-text는 항상 한 세트**로 유지하세요(`sample_id + original_prompt + video_path` 필수).
+- 기본적으로 `captions`만 `original_prompt`로 사용합니다(물리 annotation은 별도 메타로 유지). 필요 시 `--allow_non_caption_prompt`로만 override 가능합니다.
 - 권장 메타: `width,height,fps,duration,motion_score,motion_score_v2,visual_quality_score,text_bbox_num,text_bbox_ratio,label`
 - 권장 물리: `physical_phys_law,physical_n0,physical_n1,physical_n2,physical_q0,physical_q1,physical_q2,physical_q3,physical_q4,physical_quantify_n0,physical_quantify_n1,physical_quantify_n2,physical_time_min_s/max_s,physical_temp_min_c/max_c,physical_density_range_count,physical_q3_bool`
 - 줄바꿈이 많은 텍스트(`captions`, `physical_q4`)는 CSV에서 멀티라인 셀로 보이는 것이 정상입니다.
