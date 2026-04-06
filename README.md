@@ -9,7 +9,8 @@
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export PYTHONPATH=src
+# scripts/* 는 내부적으로 repo/src를 자동 추가하므로 PYTHONPATH 없이 실행 가능
+export PYTHONPATH=src  # (옵션)
 ```
 
 ## 2) 입력 데이터 가정
