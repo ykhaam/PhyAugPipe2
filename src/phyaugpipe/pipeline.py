@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import torch
-from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
 from .schemas import CoTResult, ParsedElements, SampleRecord
@@ -20,6 +19,22 @@ class PipelineConfig:
     num_frames: int = 8
     prompt_template_path: str = "prompts/cot_filtering_prompt.txt"
     device: str = "auto"  # auto | cpu | cuda
+
+
+def _process_vision_info(messages: list[dict[str, Any]]) -> tuple[list[Any], list[Any]]:
+    """
+    Lightweight replacement for qwen_vl_utils.process_vision_info.
+    Collects image payloads from chat messages and returns (images, videos).
+    """
+    images: list[Any] = []
+    videos: list[Any] = []
+    for msg in messages:
+        for item in msg.get("content", []):
+            if item.get("type") == "image" and "image" in item:
+                images.append(item["image"])
+            elif item.get("type") == "video" and "video" in item:
+                videos.append(item["video"])
+    return images, videos
 
 
 class CoTFilteringPipeline:
@@ -64,11 +79,11 @@ class CoTFilteringPipeline:
 
     def _generate(self, messages: list[dict[str, Any]]) -> str:
         text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        image_inputs, video_inputs = process_vision_info(messages)
+        image_inputs, video_inputs = _process_vision_info(messages)
         inputs = self.processor(
             text=[text],
-            images=image_inputs,
-            videos=video_inputs,
+            images=image_inputs if image_inputs else None,
+            videos=video_inputs if video_inputs else None,
             padding=True,
             return_tensors="pt",
         )
