@@ -17,6 +17,15 @@ export PYTHONPATH=src  # (옵션)
 
 `sample_id, original_prompt, video_path` 컬럼을 갖는 CSV가 필요합니다.
 
+## Troubleshooting
+
+- `RuntimeError: operator torchvision::nms does not exist`
+  - 이 오류는 보통 `torch`/`torchvision` 버전 불일치에서 발생합니다.
+  - metadata 관련 스크립트는 이제 `phyaugpipe`를 lazy import하므로 해당 비전 스택 없이도 import 단계에서 막히지 않도록 수정했습니다.
+  - 실제 VL 추론(`run_cot_stepwise.py`, `run_cot_scoring.py`)에는 여전히 호환되는 `torch`/`torchvision` 설치가 필요합니다.
+
+---
+
 ## 모델 설정 (중요)
 
 기본 모델은 `Qwen/Qwen2.5-VL-3B-Instruct` 입니다.
