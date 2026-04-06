@@ -80,6 +80,7 @@ python scripts/build_wisa_pairs_from_metadata_json.py \
 출력은 canonical 컬럼(`sample_id, original_prompt, video_path`) + 선택 메타컬럼입니다.
 - 줄바꿈이 많은 텍스트(`captions`, `physical_q4`)는 CSV에서 멀티라인 셀로 보이는 것이 정상입니다.
 - 만약 셀 안에 `sample_id,original_prompt,video_path` 같은 헤더 문자열이 섞여 있으면 `--drop_corrupted`로 제거하세요.
+- `--include_meta`를 주면 `physical_quantify_n0/n1/n2`와 파생 수치(`physical_time_min_s`, `physical_time_max_s`, `physical_temp_min_c`, `physical_temp_max_c`, `physical_density_range_count`, `physical_q3_bool`)도 함께 저장합니다.
 
 ---
 

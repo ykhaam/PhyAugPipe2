@@ -99,6 +99,33 @@ def _flatten_row(row: dict[str, Any], include_meta: bool) -> dict[str, Any]:
                 if k in pa:
                     base[f"physical_{k}"] = pa[k]
 
+            # Keep quantified fields (as JSON strings) and useful derived numeric ranges.
+            for qk in ["quantify_n0", "quantify_n1", "quantify_n2"]:
+                if qk in pa:
+                    base[f"physical_{qk}"] = json.dumps(pa[qk], ensure_ascii=False)
+
+            qn1 = pa.get("quantify_n1")
+            if isinstance(qn1, list) and len(qn1) == 2:
+                base["physical_time_min_s"] = qn1[0]
+                base["physical_time_max_s"] = qn1[1]
+
+            qn2 = pa.get("quantify_n2")
+            if isinstance(qn2, list) and len(qn2) == 2:
+                base["physical_temp_min_c"] = qn2[0]
+                base["physical_temp_max_c"] = qn2[1]
+
+            qn0 = pa.get("quantify_n0")
+            if isinstance(qn0, list):
+                base["physical_density_range_count"] = len(qn0)
+
+            q3 = pa.get("q3")
+            if isinstance(q3, str):
+                q3_norm = q3.strip().lower()
+                if q3_norm in {"yes", "y", "true", "1"}:
+                    base["physical_q3_bool"] = 1
+                elif q3_norm in {"no", "n", "false", "0"}:
+                    base["physical_q3_bool"] = 0
+
     return base
 
 
