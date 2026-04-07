@@ -196,12 +196,80 @@ python scripts/run_cot_scoring.py \
 
 ---
 
-## 6) 구현 범위
+
+## 6) Post-CoT 파이프라인 (Stage B/C/D)
+
+`step4_score.jsonl` 이후 단계는 **후처리(post-processing)** 로 분리되어 있으며, threshold를 코드에 고정하지 않습니다.
+(`step5_extended.jsonl`도 입력 가능하지만, 논문 재현 관점에서는 원문 prompt 기반의 step4 점수 결과를 권장)
+
+### Stage B: Threshold Filtering
+
+고정 임계값 또는 상위 quantile 방식 중 하나를 선택합니다.
+
+```bash
+# 예시 1) fixed threshold
+python scripts/postcot_threshold_filter.py \
+  --input_jsonl outputs/steps/step4_score.jsonl \
+  --output_jsonl outputs/postcot/filtered_t06.jsonl \
+  --output_csv outputs/postcot/filtered_t06.csv \
+  --threshold 0.6
+
+# 예시 2) top quantile
+python scripts/postcot_threshold_filter.py \
+  --input_jsonl outputs/steps/step4_score.jsonl \
+  --output_jsonl outputs/postcot/filtered_top15.jsonl \
+  --output_csv outputs/postcot/filtered_top15.csv \
+  --top_quantile 0.15
+```
+
+권장 비교 실험:
+- `--threshold 0.6`
+- `--top_quantile 0.15`
+
+### Stage C: Action Clustering
+
+문장 임베딩 모델(`sentence-transformers`)로 `original_prompt`와 action category 목록을 매칭해
+`action_category`, `action_match_score`를 기록합니다.
+
+```bash
+python scripts/postcot_action_cluster.py \
+  --input_jsonl outputs/postcot/filtered_top15.jsonl \
+  --output_jsonl outputs/postcot/clustered_top15.jsonl \
+  --output_csv outputs/postcot/clustered_top15.csv
+```
+
+커스텀 category를 쓰려면 줄바꿈 텍스트 파일을 만들어 `--categories_file`로 지정하세요.
+
+### Stage D: Physics-aware Resampling
+
+카테고리별 대표 샘플(top-k by `action_match_score`)로 난이도를 추정한 뒤,
+난이도가 높은 카테고리에 더 많은 예산을 배정해 최종 subset을 만듭니다.
+
+```bash
+python scripts/postcot_physics_resample.py \
+  --input_jsonl outputs/postcot/clustered_top15.jsonl \
+  --output_jsonl outputs/postcot/final_subset.jsonl \
+  --output_csv outputs/postcot/final_subset.csv \
+  --budget 5000 \
+  --difficulty_field videocon_physics_score \
+  --fallback_difficulty inverse_physics_richness
+```
+
+참고:
+- `videocon_physics_score`가 없으면 fallback으로 난이도를 계산합니다.
+- 논문 재현 목적이면 학습 prompt로 `original_prompt`를 사용하고, `extended`는 보조 실험용으로 함께 보관하세요.
+
+---
+
+## 7) 구현 범위
 
 - Step 1: Element Parsing
 - Step 2: Vision Checking
 - Step 3: Physics Reasoning
 - Step 4: Data Scoring (0~1)
 - Step 5: Prompt Extending
+- Post-CoT Stage B: Threshold Filtering (configurable)
+- Post-CoT Stage C: Action Clustering (sentence-transformer matching)
+- Post-CoT Stage D: Physics-aware Resampling (difficulty-based allocation)
 
-`physics_label` threshold는 강제하지 않고 모델 출력값을 그대로 유지합니다(미정이면 null).
+`physics_label` threshold는 CoT 단계에서 강제하지 않고, Stage B에서 configurable 정책으로 적용합니다.

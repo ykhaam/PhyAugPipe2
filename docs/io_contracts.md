@@ -256,3 +256,65 @@
      - `parse_json` (json string)
 2. `--output_jsonl`
    - raw model 결과 (또는 error record)
+
+---
+
+## 6) `scripts/postcot_threshold_filter.py` (Stage B)
+
+### Input
+- `--input_jsonl`: scored JSONL (`step4_score.jsonl` 권장, `step5_extended.jsonl`도 가능)
+- filtering mode (exactly one):
+  - `--threshold <float>`: `physics_richness >= threshold`
+  - `--top_quantile <float>`: top q fraction by `physics_richness`
+- optional:
+  - `--drop_errors`
+  - `--output_csv`
+
+### Output
+- `--output_jsonl`: filtered rows (original fields preserved)
+- optional `--output_csv`
+
+---
+
+## 7) `scripts/postcot_action_cluster.py` (Stage C)
+
+### Input
+- `--input_jsonl`: Stage B output
+- optional:
+  - `--categories_file`: newline-separated category list
+  - `--prompt_field`: `original_prompt` or `extended` (default: `original_prompt`)
+    - `step4_score.jsonl` 기반이면 `original_prompt` 사용 권장
+    - `step5_extended.jsonl` 기반 실험 시 `extended` 선택 가능
+  - `--model_name`: sentence-transformer model name
+  - `--batch_size`
+
+### Output
+- `--output_jsonl`: input fields +
+  - `action_category` (str)
+  - `action_match_score` (float, cosine similarity)
+- optional `--output_csv`
+
+---
+
+## 8) `scripts/postcot_physics_resample.py` (Stage D)
+
+### Input
+- `--input_jsonl`: Stage C output (must include `action_category`)
+- `--budget`: final sample count
+- optional:
+  - `--difficulty_field` (default: `videocon_physics_score`)
+  - `--fallback_difficulty`: `inverse_physics_richness` or `uniform`
+  - `--representative_topk`
+  - `--min_per_category`
+  - `--seed`
+  - `--output_csv`
+
+### Method Summary
+1. Category별로 `action_match_score` 상위 대표 샘플 선택
+2. `difficulty_field` 평균(없으면 fallback)으로 category difficulty 추정
+3. difficulty 비례로 budget 분배
+4. 각 category에서 상위 매칭 샘플부터 선택
+
+### Output
+- `--output_jsonl`: 최종 sampled subset
+- optional `--output_csv`
