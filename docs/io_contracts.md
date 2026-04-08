@@ -374,7 +374,7 @@ Backward compatibility:
 
 ### Input
 - `--input_jsonl`: Stage C output (must include `action_category`)
-- `--budget`: final sample count
+- `--N` or `--budget`: final sample count (`N` = total sampling budget)
 - optional:
   - `--difficulty_field` (default: `videocon_physics_score`)
   - `--fallback_difficulty`: `inverse_physics_richness` or `uniform`
