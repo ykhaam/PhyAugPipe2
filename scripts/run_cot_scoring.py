@@ -60,9 +60,12 @@ def main() -> None:
         "original_prompt",
         "video_path",
         "physics_richness",
+        "penalty_score",
         "reason",
         "extended",
         "parse_json",
+        "penalty_analysis_json",
+        "score_breakdown_json",
     ]
 
     with out_csv.open("w", newline="", encoding="utf-8") as f_csv, out_jsonl.open("w", encoding="utf-8") as f_jsonl:
@@ -83,9 +86,12 @@ def main() -> None:
                     "original_prompt": sample.original_prompt,
                     "video_path": sample.video_path,
                     "physics_richness": result.physics_richness,
+                    "penalty_score": result.score_breakdown.get("penalty_score", 0.0),
                     "reason": result.reason,
                     "extended": result.extended,
                     "parse_json": result.parse.model_dump_json(ensure_ascii=False),
+                    "penalty_analysis_json": json.dumps(result.penalty_analysis, ensure_ascii=False),
+                    "score_breakdown_json": json.dumps(result.score_breakdown, ensure_ascii=False),
                 }
                 writer.writerow(rec)
 

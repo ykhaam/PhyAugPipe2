@@ -18,6 +18,8 @@ class CoTResult(BaseModel):
     reason: str
     extended: str
     physics_richness: float
+    penalty_analysis: Dict[str, Any] = Field(default_factory=dict)
+    score_breakdown: Dict[str, Any] = Field(default_factory=dict)
     physics_label: Optional[int] = None
 
 

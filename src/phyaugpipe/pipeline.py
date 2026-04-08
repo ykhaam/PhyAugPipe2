@@ -172,6 +172,44 @@ class CoTFilteringPipeline:
         ]
         return [{"role": "user", "content": content}]
 
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        return max(0.0, min(1.0, float(value)))
+
+    def _compute_penalty_score(self, penalty_analysis: Dict[str, Any]) -> float:
+        camera_motion_dominant = bool(penalty_analysis.get("camera_motion_dominant", False))
+        stylized_rendering = bool(penalty_analysis.get("stylized_rendering", False))
+        static_aftermath = bool(penalty_analysis.get("static_aftermath", False))
+        showcase_without_interaction = bool(penalty_analysis.get("showcase_without_interaction", False))
+        return self._clamp01(
+            0.35 * int(camera_motion_dominant)
+            + 0.25 * int(stylized_rendering)
+            + 0.25 * int(static_aftermath)
+            + 0.15 * int(showcase_without_interaction)
+        )
+
+    def _compute_physics_richness(
+        self,
+        score_breakdown: Dict[str, Any],
+        model_physics_richness: Optional[float] = None,
+        fallback_physics_richness: float = 0.0,
+    ) -> float:
+        penalty_score = self._clamp01(float(score_breakdown.get("penalty_score", 0.0)))
+
+        if model_physics_richness is not None:
+            # Prefer model-provided base quality score, then apply deterministic penalty.
+            return self._clamp01(float(model_physics_richness) - penalty_score)
+
+        # Backward-compatible fallback when model did not return physics_richness:
+        # derive base score from available sub-scores.
+        try:
+            entity_interaction_score = float(score_breakdown["entity_interaction_score"])
+            force_outcome_score = float(score_breakdown["force_outcome_score"])
+            causal_clarity_score = float(score_breakdown["causal_clarity_score"])
+            base_score = (entity_interaction_score + force_outcome_score + causal_clarity_score) / 3.0
+            return self._clamp01(base_score - penalty_score)
+        except (KeyError, TypeError, ValueError):
+            return self._clamp01(fallback_physics_richness)
 
     def _step_instruction(self, step_idx: int, output_desc: str) -> str:
         return (
@@ -210,15 +248,52 @@ class CoTFilteringPipeline:
         parsed = self._extract_json(out)
         return str(parsed.get("reason", ""))
 
-    def run_step4_score(self, sample: SampleRecord, parse_obj: Dict[str, Any], reason: str) -> float:
+    def run_step4_score(self, sample: SampleRecord, parse_obj: Dict[str, Any], reason: str) -> Dict[str, Any]:
         instruction = self._step_instruction(
             4,
-            "Score physics_richness in [0,1] using parse+reason and frame evidence, including camera motion/stylization/static-aftermath penalties. Return JSON with key 'physics_richness'.",
+            (
+                "Use BOTH original prompt text and sampled video frames to score physics quality. "
+                "Return JSON with keys: 'penalty_analysis' and 'score_breakdown'. "
+                "'penalty_analysis' must include booleans: camera_motion_dominant, stylized_rendering, "
+                "static_aftermath, showcase_without_interaction; plus penalty_keywords (list, <=5 short phrases). "
+                "Judge camera-motion dominance from global viewpoint shifts vs localized physical interaction. "
+                "Judge stylized rendering from prompt/style cues (cartoon/CGI/rendered) and frame realism. "
+                "Judge static aftermath from frames showing mostly final state with little process visibility. "
+                "Judge showcase_without_interaction when arrangement/display dominates over active interaction. "
+                "'score_breakdown' must include entity_interaction_score, force_outcome_score, causal_clarity_score in [0,1]. "
+                "Also return base 'physics_richness' in [0,1] before deterministic penalties are applied in Python. "
+                "Do not provide long explanations."
+            ),
         )
         payload = {"parse": parse_obj, "reason": reason}
         out = self._generate(self._messages_with_frames(instruction, sample, extra_payload=payload))
         parsed = self._extract_json(out)
-        return float(parsed.get("physics_richness", 0.0))
+        penalty_analysis = parsed.get("penalty_analysis", {})
+        if not isinstance(penalty_analysis, dict):
+            penalty_analysis = {}
+
+        penalty_keywords = penalty_analysis.get("penalty_keywords", [])
+        if not isinstance(penalty_keywords, list):
+            penalty_keywords = []
+        penalty_analysis["penalty_keywords"] = [str(x) for x in penalty_keywords[:5]]
+
+        score_breakdown = parsed.get("score_breakdown", {})
+        if not isinstance(score_breakdown, dict):
+            score_breakdown = {}
+
+        penalty_score = self._compute_penalty_score(penalty_analysis)
+        score_breakdown["penalty_score"] = penalty_score
+
+        physics_richness = self._compute_physics_richness(
+            score_breakdown=score_breakdown,
+            model_physics_richness=parsed.get("physics_richness"),
+            fallback_physics_richness=float(parsed.get("physics_richness", 0.0)),
+        )
+        return {
+            "penalty_analysis": penalty_analysis,
+            "score_breakdown": score_breakdown,
+            "physics_richness": physics_richness,
+        }
 
     def run_step5_extend(self, sample: SampleRecord, parse_obj: Dict[str, Any], reason: str) -> str:
         instruction = self._step_instruction(
@@ -236,11 +311,32 @@ class CoTFilteringPipeline:
         parsed = self._extract_json(output_text)
 
         parse_obj = ParsedElements(**parsed.get("parse", {}))
+        penalty_analysis = parsed.get("penalty_analysis", {})
+        if not isinstance(penalty_analysis, dict):
+            penalty_analysis = {}
+
+        penalty_keywords = penalty_analysis.get("penalty_keywords", [])
+        if not isinstance(penalty_keywords, list):
+            penalty_keywords = []
+        penalty_analysis["penalty_keywords"] = [str(x) for x in penalty_keywords[:5]]
+
+        score_breakdown = parsed.get("score_breakdown", {})
+        if not isinstance(score_breakdown, dict):
+            score_breakdown = {}
+        score_breakdown["penalty_score"] = self._compute_penalty_score(penalty_analysis)
+        physics_richness = self._compute_physics_richness(
+            score_breakdown=score_breakdown,
+            model_physics_richness=parsed.get("physics_richness"),
+            fallback_physics_richness=float(parsed.get("physics_richness", 0.0)),
+        )
+
         return CoTResult(
             original=parsed.get("original", sample.original_prompt),
             parse=parse_obj,
             reason=parsed.get("reason", ""),
             extended=parsed.get("extended", ""),
-            physics_richness=float(parsed.get("physics_richness", 0.0)),
+            physics_richness=physics_richness,
+            penalty_analysis=penalty_analysis,
+            score_breakdown=score_breakdown,
             physics_label=parsed.get("physics_label", None),
         )

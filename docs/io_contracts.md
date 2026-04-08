@@ -188,6 +188,10 @@
 }
 ```
 
+`penalty_score`는 Python에서 boolean penalty flags로 결정론적으로 계산하며,
+최종 `physics_richness`는 `clamp(base_physics_richness - penalty_score, 0, 1)`로 반영된다
+(`base_physics_richness`는 모델이 반환한 `physics_richness`).
+
 ## Step 4 (Data Scoring)
 ### Input
 - `--subset_csv`
@@ -202,6 +206,19 @@
   "video_path": "string",
   "parse": {...},
   "reason": "string",
+  "penalty_analysis": {
+    "camera_motion_dominant": false,
+    "stylized_rendering": false,
+    "static_aftermath": false,
+    "showcase_without_interaction": false,
+    "penalty_keywords": []
+  },
+  "score_breakdown": {
+    "entity_interaction_score": 0.0,
+    "force_outcome_score": 0.0,
+    "causal_clarity_score": 0.0,
+    "penalty_score": 0.0
+  },
   "physics_richness": 0.0
 }
 ```
@@ -220,6 +237,8 @@
   "video_path": "string",
   "parse": {...},
   "reason": "string",
+  "penalty_analysis": {...},
+  "score_breakdown": {...},
   "physics_richness": 0.0,
   "extended": "string"
 }
@@ -251,9 +270,12 @@
      - `original_prompt`
      - `video_path`
      - `physics_richness` (float)
+     - `penalty_score` (float)
      - `reason` (str)
      - `extended` (str)
      - `parse_json` (json string)
+     - `penalty_analysis_json` (json string)
+     - `score_breakdown_json` (json string)
 2. `--output_jsonl`
    - raw model 결과 (또는 error record)
 
