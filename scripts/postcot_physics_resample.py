@@ -15,7 +15,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input_jsonl", required=True, help="Action-clustered JSONL")
     p.add_argument("--output_jsonl", required=True)
     p.add_argument("--output_csv", default="")
-    p.add_argument("--budget", type=int, required=True, help="Final number of samples to keep")
+    p.add_argument(
+        "--budget",
+        type=int,
+        default=None,
+        help="Final number of samples to keep (alias: --N).",
+    )
+    p.add_argument(
+        "--N",
+        dest="sampling_budget_n",
+        type=int,
+        default=None,
+        help="Total sampling budget N from the paper. If set, this value is used as the final sample count.",
+    )
     p.add_argument("--difficulty_field", default="videocon_physics_score", help="Field for category difficulty estimation")
     p.add_argument("--fallback_difficulty", choices=["inverse_physics_richness", "uniform"], default="inverse_physics_richness")
     p.add_argument("--difficulty_config", default="configs/action_difficulty.yaml", help="YAML file containing per-category prior difficulty")
@@ -151,14 +163,17 @@ def _mean_failure(rep_df: pd.DataFrame, difficulty_field: str, fallback: str) ->
 
 def main() -> None:
     args = parse_args()
-    if args.budget <= 0:
-        raise ValueError("--budget must be > 0")
+    budget = args.sampling_budget_n if args.sampling_budget_n is not None else args.budget
+    if budget is None:
+        raise ValueError("Either --budget or --N must be provided")
+    if budget <= 0:
+        raise ValueError("Sampling budget must be > 0 (--budget/--N)")
 
     df = _load_rows(args.input_jsonl)
     if args.input_hist_json:
         _validate_input_hist_json(df, args.input_hist_json)
-    if args.budget > len(df):
-        raise ValueError(f"budget({args.budget}) > input_count({len(df)})")
+    if budget > len(df):
+        raise ValueError(f"budget({budget}) > input_count({len(df)})")
     if args.min_count <= 0:
         raise ValueError("--min_count must be > 0")
 
@@ -200,10 +215,10 @@ def main() -> None:
         raise ValueError("No categories available for allocation after min_count/low_priority_mode filtering")
     base_alloc = {cat: min(args.min_per_category, len(grouped[cat])) for cat in cats}
     allocated = sum(base_alloc.values())
-    if allocated > args.budget:
+    if allocated > budget:
         raise ValueError("min_per_category allocation exceeds budget")
 
-    remaining = args.budget - allocated
+    remaining = budget - allocated
     weights = np.array([difficulties[c] for c in cats], dtype=float)
     weights = np.clip(weights, 1e-9, None)
     weights = weights / weights.sum()
@@ -262,6 +277,7 @@ def main() -> None:
     print(json.dumps({
         "input_count": int(len(df)),
         "output_count": int(len(selected)),
+        "sampling_budget_n": int(budget),
         "num_categories": n_cat,
         "allocations": target_alloc,
         "difficulty_field": args.difficulty_field,
