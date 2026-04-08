@@ -385,12 +385,21 @@ Backward compatibility:
   - `--ambiguity_threshold` (default: `0.05`)
   - `--low_priority_mode`: `exclude` or `bucket`
   - `--difficulty_weights` (e.g. `failure=0.5,prior=0.3,ambiguity=0.2`)
+  - `--videophy2_mode` (`auto`|`command`|`off`, default `auto`)
+  - `--videophy2_eval_command` (optional VideoPhy2 representative evaluation command template with `{input_jsonl}` and `{output_jsonl}`)
+  - `--videophy2_repo` (default: `https://github.com/Hritikbansal/videophy/tree/main/VIDEOPHY2`)
+  - `--videophy2_root` (default: `VIDEOPHY2`, local clone path used in `auto` mode)
+  - `--videophy2_checkpoint` (required in `auto` mode)
+  - `--video_path_field`, `--caption_field` (bridge input mapping, default `video_path`, `original_prompt`)
   - `--seed`
   - `--input_hist_json` (H_f 파일; 제공 시 category 누락/예상 count 불일치 검증 수행)
   - `--output_csv`
 
 ### Method Summary
-1. Category별로 `action_match_score` 상위 대표 샘플 선택
+1. Category별로 `action_match_score` 상위 대표 샘플(top-nc) 선택
+   - 기본(`--videophy2_mode auto`)으로 대표 샘플을 VideoPhy2로 채점 후 `difficulty_field`로 사용
+   - `command` 모드에서는 사용자 제공 커맨드 템플릿으로 채점
+   - `off` 모드에서는 외부 채점 없이 기존 필드/ fallback 사용
 2. 결합 난이도 계산
    - `failure = 1 - mean(difficulty_field)` (없으면 fallback 사용)
    - `prior_difficulty = difficulty_config[action_category]` (없으면 0.5)
