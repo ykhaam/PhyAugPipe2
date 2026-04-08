@@ -202,6 +202,21 @@
   "video_path": "string",
   "parse": {...},
   "reason": "string",
+  "positive_checklist": {
+    "multiple_physical_entities_present": false,
+    "explicit_entity_interaction_present": false,
+    "chain_or_dependent_interaction_present": false,
+    "explicit_force_present": false,
+    "explicit_outcome_present": false,
+    "force_outcome_causally_linked": false,
+    "cause_effect_relation_present": false,
+    "multi_step_causality_present": false,
+    "reason_supported_by_visible_process": false,
+    "interaction_keywords": [],
+    "force_keywords": [],
+    "outcome_keywords": [],
+    "causal_keywords": []
+  },
   "penalty_analysis": {
     "camera_motion_dominant": false,
     "stylized_rendering": false,
@@ -233,6 +248,7 @@
   "video_path": "string",
   "parse": {...},
   "reason": "string",
+  "positive_checklist": {...},
   "penalty_analysis": {...},
   "score_breakdown": {...},
   "physics_richness": 0.0,
@@ -274,6 +290,15 @@
      - `score_breakdown_json` (json string)
 2. `--output_jsonl`
    - raw model 결과 (또는 error record)
+
+### Step 4 deterministic scoring formulas
+- `entity_interaction_score = clamp(0.25*multiple + 0.45*explicit_interaction + 0.30*chain_interaction, 0, 1)`
+- `force_outcome_score = clamp(0.30*explicit_force + 0.30*explicit_outcome + 0.40*force_outcome_linked, 0, 1)`
+- `causal_clarity_score = clamp(0.35*cause_effect + 0.30*multi_step + 0.35*visible_process_supported, 0, 1)`
+- `physics_richness = clamp(0.30*entity_interaction + 0.30*force_outcome + 0.30*causal_clarity - 0.10*penalty_score, 0, 1)`
+
+Backward compatibility:
+- If old Step 4 JSON lacks `positive_checklist`, pipeline uses conservative defaults (`False` + empty keywords), so execution still succeeds.
 
 ---
 

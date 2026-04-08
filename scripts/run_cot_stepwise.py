@@ -23,8 +23,8 @@ STEP_FIELDS = {
     1: ["sample_id", "original_prompt", "video_path", "parse"],
     2: ["sample_id", "original_prompt", "video_path", "parse"],
     3: ["sample_id", "original_prompt", "video_path", "parse", "reason"],
-    4: ["sample_id", "original_prompt", "video_path", "parse", "reason", "penalty_analysis", "score_breakdown", "physics_richness"],
-    5: ["sample_id", "original_prompt", "video_path", "parse", "reason", "penalty_analysis", "score_breakdown", "physics_richness", "extended"],
+    4: ["sample_id", "original_prompt", "video_path", "parse", "reason", "positive_checklist", "penalty_analysis", "score_breakdown", "physics_richness"],
+    5: ["sample_id", "original_prompt", "video_path", "parse", "reason", "positive_checklist", "penalty_analysis", "score_breakdown", "physics_richness", "extended"],
 }
 
 
@@ -121,6 +121,7 @@ def main() -> None:
                         **base,
                         "parse": parse_obj,
                         "reason": reason,
+                        "positive_checklist": step4.get("positive_checklist", {}),
                         "penalty_analysis": step4.get("penalty_analysis", {}),
                         "score_breakdown": step4.get("score_breakdown", {}),
                         "physics_richness": float(step4.get("physics_richness", 0.0)),
@@ -135,6 +136,7 @@ def main() -> None:
                         **base,
                         "parse": parse_obj,
                         "reason": reason,
+                        "positive_checklist": prev_row.get("positive_checklist", {}),
                         "penalty_analysis": prev_row.get("penalty_analysis", {}),
                         "score_breakdown": prev_row.get("score_breakdown", {}),
                         "physics_richness": score,
