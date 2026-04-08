@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--low_priority_mode", choices=["exclude", "bucket"], default="exclude", help="How to handle categories below min_count")
     p.add_argument("--difficulty_weights", default="failure=0.5,prior=0.3,ambiguity=0.2", help="Comma-separated weights for combined difficulty")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--input_hist_json", default="", help="Optional Stage C histogram JSON (H_f) to validate category counts")
     return p.parse_args()
 
 
@@ -47,6 +48,47 @@ def _load_rows(path: str) -> pd.DataFrame:
         df["physics_richness"] = pd.to_numeric(df["physics_richness"], errors="coerce").fillna(0.0)
     return df
 
+
+def _validate_input_hist_json(df: pd.DataFrame, hist_path: str) -> None:
+    raw = json.loads(Path(hist_path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("input_hist_json must be a JSON object")
+
+    counts_raw = raw.get("counts")
+    if not isinstance(counts_raw, dict):
+        raise ValueError("input_hist_json must include object field 'counts'")
+
+    expected_counts: dict[str, int] = {}
+    for cat, count in counts_raw.items():
+        try:
+            expected_counts[str(cat)] = int(count)
+        except (TypeError, ValueError):
+            raise ValueError(f"invalid count in input_hist_json for category={cat!r}: {count!r}")
+
+    actual_counts_series = df.groupby("action_category").size()
+    actual_counts = {str(cat): int(count) for cat, count in actual_counts_series.items()}
+
+    missing_categories = sorted([cat for cat in expected_counts if cat not in actual_counts])
+    unexpected_categories = sorted([cat for cat in actual_counts if cat not in expected_counts])
+    mismatched_counts = {
+        cat: {"expected": expected_counts[cat], "actual": actual_counts[cat]}
+        for cat in sorted(set(expected_counts) & set(actual_counts))
+        if expected_counts[cat] != actual_counts[cat]
+    }
+
+    if missing_categories or unexpected_categories or mismatched_counts:
+        raise ValueError(
+            "input_hist_json validation failed: "
+            f"missing_categories={missing_categories}, "
+            f"unexpected_categories={unexpected_categories}, "
+            f"count_mismatches={mismatched_counts}"
+        )
+
+    total_count = raw.get("total_count")
+    if total_count is not None and int(total_count) != int(len(df)):
+        raise ValueError(
+            f"input_hist_json total_count mismatch: expected={int(total_count)} actual={int(len(df))}"
+        )
 
 def _estimate_difficulty(rep_df: pd.DataFrame, difficulty_field: str, fallback: str) -> float:
     if difficulty_field in rep_df.columns:
@@ -113,6 +155,8 @@ def main() -> None:
         raise ValueError("--budget must be > 0")
 
     df = _load_rows(args.input_jsonl)
+    if args.input_hist_json:
+        _validate_input_hist_json(df, args.input_hist_json)
     if args.budget > len(df):
         raise ValueError(f"budget({args.budget}) > input_count({len(df)})")
     if args.min_count <= 0:

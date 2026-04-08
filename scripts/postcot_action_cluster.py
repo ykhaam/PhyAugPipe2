@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--low_margin_threshold", type=float, default=0.05, help="Threshold used for low_margin_ratio (margin < threshold)")
     p.add_argument("--output_stats_json", default="", help="Optional path to save category-level stats JSON")
+    p.add_argument("--output_hist_json", default="", help="Optional path to save category histogram JSON (H_f)")
     return p.parse_args()
 
 
@@ -120,16 +121,35 @@ def main() -> None:
             "low_margin_ratio": float((margins < args.low_margin_threshold).mean()),
         }
 
+    category_counts = {str(cat): int(len(g)) for cat, g in grouped}
+    total_count = int(sum(category_counts.values()))
+    if total_count > 0:
+        category_ratios = {cat: float(count / total_count) for cat, count in category_counts.items()}
+    else:
+        category_ratios = {cat: 0.0 for cat in category_counts}
+
+    hist_payload = {
+        "counts": category_counts,
+        "total_count": total_count,
+        "ratios": category_ratios,
+    }
+
     if args.output_stats_json:
         out_stats = Path(args.output_stats_json)
         out_stats.parent.mkdir(parents=True, exist_ok=True)
         out_stats.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if args.output_hist_json:
+        out_hist = Path(args.output_hist_json)
+        out_hist.parent.mkdir(parents=True, exist_ok=True)
+        out_hist.write_text(json.dumps(hist_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(json.dumps({
         "num_samples": len(rows),
         "num_categories": len(categories),
         "low_margin_threshold": args.low_margin_threshold,
         "category_stats": stats,
+        "histogram": hist_payload,
     }, ensure_ascii=False))
 
 

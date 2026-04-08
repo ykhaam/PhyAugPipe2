@@ -347,6 +347,26 @@ Backward compatibility:
     - `count`
     - `mean_margin`
     - `low_margin_ratio` (`margin < low_margin_threshold`)
+- optional `--output_hist_json` (H_f): Stage C→D histogram contract 파일
+
+### Stage C→D Contract: H_f (Histogram JSON)
+- Stage C가 `--output_hist_json`으로 생성하고 Stage D가 `--input_hist_json`으로 소비
+- schema:
+```json
+{
+  "counts": {
+    "<action_category>": 123
+  },
+  "total_count": 1234,
+  "ratios": {
+    "<action_category>": 0.0997
+  }
+}
+```
+- constraints:
+  - `counts`: `{category: count}` 매핑 (count는 정수)
+  - `total_count = sum(counts.values())`
+  - `ratios[category] = counts[category] / total_count`
 
 ---
 
@@ -366,6 +386,7 @@ Backward compatibility:
   - `--low_priority_mode`: `exclude` or `bucket`
   - `--difficulty_weights` (e.g. `failure=0.5,prior=0.3,ambiguity=0.2`)
   - `--seed`
+  - `--input_hist_json` (H_f 파일; 제공 시 category 누락/예상 count 불일치 검증 수행)
   - `--output_csv`
 
 ### Method Summary
