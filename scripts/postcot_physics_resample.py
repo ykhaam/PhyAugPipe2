@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import shlex
 
 import numpy as np
 import pandas as pd
@@ -55,6 +56,16 @@ def parse_args() -> argparse.Namespace:
         default=VIDEOPHY2_GITHUB_URL,
         help="Reference VideoPhy2 repository URL (used for provenance in output summary).",
     )
+    p.add_argument(
+        "--videophy2_mode",
+        choices=["auto", "command", "off"],
+        default="auto",
+        help="VideoPhy2 representative scoring mode. 'auto' runs the official VideoPhy2 inference bridge by default.",
+    )
+    p.add_argument("--videophy2_root", default="VIDEOPHY2", help="Local path to cloned VideoPhy2 repo")
+    p.add_argument("--videophy2_checkpoint", default="", help="Path to VideoPhy2 checkpoint directory")
+    p.add_argument("--video_path_field", default="video_path", help="Input column name for video path")
+    p.add_argument("--caption_field", default="original_prompt", help="Input column name for caption/prompt")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--input_hist_json", default="", help="Optional Stage C histogram JSON (H_f) to validate category counts")
     return p.parse_args()
@@ -266,6 +277,29 @@ def _run_videophy2_on_representatives(
         "num_representatives_missing_score": int(missing),
     }
 
+def _resolve_videophy2_eval_command(args: argparse.Namespace) -> str:
+    if args.videophy2_mode == "off":
+        return ""
+    if args.videophy2_mode == "command":
+        if not args.videophy2_eval_command:
+            raise ValueError("--videophy2_mode command requires --videophy2_eval_command")
+        return args.videophy2_eval_command
+    # auto mode
+    if args.videophy2_eval_command:
+        return args.videophy2_eval_command
+    if not args.videophy2_checkpoint:
+        raise ValueError("--videophy2_mode auto requires --videophy2_checkpoint")
+    bridge_script = Path(__file__).with_name("videophy2_eval_bridge.py")
+    return (
+        f"python {shlex.quote(str(bridge_script))} "
+        f"--input_jsonl {{input_jsonl}} --output_jsonl {{output_jsonl}} "
+        f"--videophy2_root {shlex.quote(args.videophy2_root)} "
+        f"--checkpoint {shlex.quote(args.videophy2_checkpoint)} "
+        f"--score_field {shlex.quote(args.difficulty_field)} "
+        f"--video_path_field {shlex.quote(args.video_path_field)} "
+        f"--caption_field {shlex.quote(args.caption_field)}"
+    )
+
 
 def main() -> None:
     args = parse_args()
@@ -300,10 +334,11 @@ def main() -> None:
         grouped[cat] = ranked
         reps_by_cat[cat] = reps
 
+    resolved_eval_command = _resolve_videophy2_eval_command(args)
     reps_by_cat, videophy2_eval_stats = _run_videophy2_on_representatives(
         reps_by_cat=reps_by_cat,
         difficulty_field=args.difficulty_field,
-        eval_command_template=args.videophy2_eval_command,
+        eval_command_template=resolved_eval_command,
     )
 
     for cat in sorted(grouped.keys()):
@@ -407,7 +442,8 @@ def main() -> None:
         "low_priority_categories": sorted([str(c) for c in low_priority_cats]),
         "difficulty_weights": weights_cfg,
         "difficulty_components": components,
-        "videophy2_eval_command_used": bool(args.videophy2_eval_command),
+        "videophy2_mode": args.videophy2_mode,
+        "videophy2_eval_command_used": bool(resolved_eval_command),
         "videophy2_eval_stats": videophy2_eval_stats,
         "videophy2_repo": args.videophy2_repo,
     }, ensure_ascii=False))
