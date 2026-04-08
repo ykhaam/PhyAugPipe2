@@ -162,6 +162,18 @@ python scripts/run_cot_stepwise.py \
 
 ---
 
+### Step 4 checklist-driven scoring (update)
+
+- Step 4는 이제 `positive_checklist`(boolean + keyword evidence)를 함께 반환합니다.
+- Python이 아래 3개 positive sub-score를 **결정론적으로 계산**합니다.
+  - `entity_interaction_score`
+  - `force_outcome_score`
+  - `causal_clarity_score`
+- `penalty_score`도 기존처럼 penalty boolean에서 결정론적으로 계산합니다.
+- 최종 `physics_richness`는 모델 raw 값보다 위 sub-score/penalty 기반 계산을 우선합니다(모델 값은 fallback/debug 용도).
+
+---
+
 
 ## CPU에서 테스트하기
 

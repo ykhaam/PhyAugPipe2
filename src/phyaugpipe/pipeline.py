@@ -188,6 +188,68 @@ class CoTFilteringPipeline:
             + 0.15 * int(showcase_without_interaction)
         )
 
+    @staticmethod
+    def _keyword_list(payload: Dict[str, Any], key: str) -> list[str]:
+        keywords = payload.get(key, [])
+        if not isinstance(keywords, list):
+            keywords = []
+        return [str(x) for x in keywords[:5]]
+
+    def _normalize_positive_checklist(self, positive_checklist: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(positive_checklist, dict):
+            positive_checklist = {}
+        normalized = {
+            "multiple_physical_entities_present": bool(
+                positive_checklist.get("multiple_physical_entities_present", False)
+            ),
+            "explicit_entity_interaction_present": bool(
+                positive_checklist.get("explicit_entity_interaction_present", False)
+            ),
+            "chain_or_dependent_interaction_present": bool(
+                positive_checklist.get("chain_or_dependent_interaction_present", False)
+            ),
+            "explicit_force_present": bool(positive_checklist.get("explicit_force_present", False)),
+            "explicit_outcome_present": bool(positive_checklist.get("explicit_outcome_present", False)),
+            "force_outcome_causally_linked": bool(
+                positive_checklist.get("force_outcome_causally_linked", False)
+            ),
+            "cause_effect_relation_present": bool(
+                positive_checklist.get("cause_effect_relation_present", False)
+            ),
+            "multi_step_causality_present": bool(
+                positive_checklist.get("multi_step_causality_present", False)
+            ),
+            "reason_supported_by_visible_process": bool(
+                positive_checklist.get("reason_supported_by_visible_process", False)
+            ),
+            "interaction_keywords": self._keyword_list(positive_checklist, "interaction_keywords"),
+            "force_keywords": self._keyword_list(positive_checklist, "force_keywords"),
+            "outcome_keywords": self._keyword_list(positive_checklist, "outcome_keywords"),
+            "causal_keywords": self._keyword_list(positive_checklist, "causal_keywords"),
+        }
+        return normalized
+
+    def _compute_entity_interaction_score(self, positive_checklist: Dict[str, Any]) -> float:
+        return self._clamp01(
+            0.25 * int(bool(positive_checklist.get("multiple_physical_entities_present", False)))
+            + 0.45 * int(bool(positive_checklist.get("explicit_entity_interaction_present", False)))
+            + 0.30 * int(bool(positive_checklist.get("chain_or_dependent_interaction_present", False)))
+        )
+
+    def _compute_force_outcome_score(self, positive_checklist: Dict[str, Any]) -> float:
+        return self._clamp01(
+            0.30 * int(bool(positive_checklist.get("explicit_force_present", False)))
+            + 0.30 * int(bool(positive_checklist.get("explicit_outcome_present", False)))
+            + 0.40 * int(bool(positive_checklist.get("force_outcome_causally_linked", False)))
+        )
+
+    def _compute_causal_clarity_score(self, positive_checklist: Dict[str, Any]) -> float:
+        return self._clamp01(
+            0.35 * int(bool(positive_checklist.get("cause_effect_relation_present", False)))
+            + 0.30 * int(bool(positive_checklist.get("multi_step_causality_present", False)))
+            + 0.35 * int(bool(positive_checklist.get("reason_supported_by_visible_process", False)))
+        )
+
     def _compute_physics_richness(
         self,
         score_breakdown: Dict[str, Any],
@@ -201,8 +263,37 @@ class CoTFilteringPipeline:
         except (KeyError, TypeError, ValueError):
             return self._clamp01(fallback_physics_richness)
 
-        base_score = (entity_interaction_score + force_outcome_score + causal_clarity_score) / 3.0
-        return self._clamp01(base_score - penalty_score)
+        return self._clamp01(
+            0.30 * entity_interaction_score
+            + 0.30 * force_outcome_score
+            + 0.30 * causal_clarity_score
+            - 0.10 * penalty_score
+        )
+
+    def _populate_step4_scores(
+        self,
+        parsed: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], float]:
+        positive_checklist = self._normalize_positive_checklist(parsed.get("positive_checklist", {}))
+        penalty_analysis = parsed.get("penalty_analysis", {})
+        if not isinstance(penalty_analysis, dict):
+            penalty_analysis = {}
+        penalty_analysis["penalty_keywords"] = self._keyword_list(penalty_analysis, "penalty_keywords")
+
+        score_breakdown = parsed.get("score_breakdown", {})
+        if not isinstance(score_breakdown, dict):
+            score_breakdown = {}
+
+        score_breakdown["entity_interaction_score"] = self._compute_entity_interaction_score(positive_checklist)
+        score_breakdown["force_outcome_score"] = self._compute_force_outcome_score(positive_checklist)
+        score_breakdown["causal_clarity_score"] = self._compute_causal_clarity_score(positive_checklist)
+        score_breakdown["penalty_score"] = self._compute_penalty_score(penalty_analysis)
+
+        physics_richness = self._compute_physics_richness(
+            score_breakdown=score_breakdown,
+            fallback_physics_richness=float(parsed.get("physics_richness", 0.0)),
+        )
+        return positive_checklist, penalty_analysis, score_breakdown, physics_richness
 
     def _step_instruction(self, step_idx: int, output_desc: str) -> str:
         return (
@@ -246,41 +337,30 @@ class CoTFilteringPipeline:
             4,
             (
                 "Use BOTH original prompt text and sampled video frames to score physics quality. "
-                "Return JSON with keys: 'penalty_analysis' and 'score_breakdown'. "
+                "Return JSON with keys: 'positive_checklist', 'penalty_analysis' and 'score_breakdown'. "
+                "'positive_checklist' must include booleans: multiple_physical_entities_present, "
+                "explicit_entity_interaction_present, chain_or_dependent_interaction_present, "
+                "explicit_force_present, explicit_outcome_present, force_outcome_causally_linked, "
+                "cause_effect_relation_present, multi_step_causality_present, reason_supported_by_visible_process. "
+                "'positive_checklist' must include short keyword lists (<=5 each): interaction_keywords, "
+                "force_keywords, outcome_keywords, causal_keywords. "
                 "'penalty_analysis' must include booleans: camera_motion_dominant, stylized_rendering, "
                 "static_aftermath, showcase_without_interaction; plus penalty_keywords (list, <=5 short phrases). "
+                "Do NOT rely on generic motion; verify real object interaction, explicit force/outcome, and grounded visible causal process. "
                 "Judge camera-motion dominance from global viewpoint shifts vs localized physical interaction. "
                 "Judge stylized rendering from prompt/style cues (cartoon/CGI/rendered) and frame realism. "
                 "Judge static aftermath from frames showing mostly final state with little process visibility. "
                 "Judge showcase_without_interaction when arrangement/display dominates over active interaction. "
-                "'score_breakdown' must include entity_interaction_score, force_outcome_score, causal_clarity_score in [0,1]. "
-                "Do not provide long explanations."
+                "'score_breakdown' may include scalar scores, but Python computes final sub-scores and physics_richness deterministically. "
+                "Return short keywords only, no long explanations."
             ),
         )
         payload = {"parse": parse_obj, "reason": reason}
         out = self._generate(self._messages_with_frames(instruction, sample, extra_payload=payload))
         parsed = self._extract_json(out)
-        penalty_analysis = parsed.get("penalty_analysis", {})
-        if not isinstance(penalty_analysis, dict):
-            penalty_analysis = {}
-
-        penalty_keywords = penalty_analysis.get("penalty_keywords", [])
-        if not isinstance(penalty_keywords, list):
-            penalty_keywords = []
-        penalty_analysis["penalty_keywords"] = [str(x) for x in penalty_keywords[:5]]
-
-        score_breakdown = parsed.get("score_breakdown", {})
-        if not isinstance(score_breakdown, dict):
-            score_breakdown = {}
-
-        penalty_score = self._compute_penalty_score(penalty_analysis)
-        score_breakdown["penalty_score"] = penalty_score
-
-        physics_richness = self._compute_physics_richness(
-            score_breakdown=score_breakdown,
-            fallback_physics_richness=float(parsed.get("physics_richness", 0.0)),
-        )
+        positive_checklist, penalty_analysis, score_breakdown, physics_richness = self._populate_step4_scores(parsed)
         return {
+            "positive_checklist": positive_checklist,
             "penalty_analysis": penalty_analysis,
             "score_breakdown": score_breakdown,
             "physics_richness": physics_richness,
@@ -302,23 +382,7 @@ class CoTFilteringPipeline:
         parsed = self._extract_json(output_text)
 
         parse_obj = ParsedElements(**parsed.get("parse", {}))
-        penalty_analysis = parsed.get("penalty_analysis", {})
-        if not isinstance(penalty_analysis, dict):
-            penalty_analysis = {}
-
-        penalty_keywords = penalty_analysis.get("penalty_keywords", [])
-        if not isinstance(penalty_keywords, list):
-            penalty_keywords = []
-        penalty_analysis["penalty_keywords"] = [str(x) for x in penalty_keywords[:5]]
-
-        score_breakdown = parsed.get("score_breakdown", {})
-        if not isinstance(score_breakdown, dict):
-            score_breakdown = {}
-        score_breakdown["penalty_score"] = self._compute_penalty_score(penalty_analysis)
-        physics_richness = self._compute_physics_richness(
-            score_breakdown=score_breakdown,
-            fallback_physics_richness=float(parsed.get("physics_richness", 0.0)),
-        )
+        positive_checklist, penalty_analysis, score_breakdown, physics_richness = self._populate_step4_scores(parsed)
 
         return CoTResult(
             original=parsed.get("original", sample.original_prompt),
@@ -326,6 +390,7 @@ class CoTFilteringPipeline:
             reason=parsed.get("reason", ""),
             extended=parsed.get("extended", ""),
             physics_richness=physics_richness,
+            positive_checklist=positive_checklist,
             penalty_analysis=penalty_analysis,
             score_breakdown=score_breakdown,
             physics_label=parsed.get("physics_label", None),

@@ -18,6 +18,7 @@ class CoTResult(BaseModel):
     reason: str
     extended: str
     physics_richness: float
+    positive_checklist: Dict[str, Any] = Field(default_factory=dict)
     penalty_analysis: Dict[str, Any] = Field(default_factory=dict)
     score_breakdown: Dict[str, Any] = Field(default_factory=dict)
     physics_label: Optional[int] = None
