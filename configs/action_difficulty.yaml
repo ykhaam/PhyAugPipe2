@@ -1,0 +1,23 @@
+# Prior difficulty per Stage C action category (0.0~1.0)
+# Used by scripts/postcot_physics_resample.py --difficulty_config
+prior_difficulty:
+  falling: 0.65
+  throwing: 0.55
+  bouncing: 0.50
+  collision: 0.60
+  sliding: 0.45
+  rolling: 0.40
+  pouring: 0.50
+  breaking: 0.70
+  explosion: 0.85
+  burning: 0.80
+  floating: 0.45
+  sinking: 0.55
+  lifting: 0.50
+  pushing: 0.40
+  pulling: 0.40
+  spinning: 0.45
+  stretching: 0.50
+  deformation: 0.65
+  fluid flow: 0.55
+  projectile motion: 0.70

@@ -241,21 +241,32 @@ python scripts/postcot_threshold_filter.py \
 ### Stage C: Action Clustering
 
 문장 임베딩 모델(`sentence-transformers`)로 `original_prompt`와 action category 목록을 매칭해
-`action_category`, `action_match_score`를 기록합니다.
+`action_category`, `action_match_score`를 기록합니다. 또한 샘플별 `top1_score`, `top2_score`, `margin=top1-top2`를 저장하고,
+category별 `count`, `mean_margin`, `low_margin_ratio` 통계를 JSON으로 출력할 수 있습니다.
 
 ```bash
 python scripts/postcot_action_cluster.py \
   --input_jsonl outputs/postcot/filtered_top15.jsonl \
   --output_jsonl outputs/postcot/clustered_top15.jsonl \
-  --output_csv outputs/postcot/clustered_top15.csv
+  --output_csv outputs/postcot/clustered_top15.csv \
+  --output_stats_json outputs/postcot/clustered_top15_stats.json
 ```
 
 커스텀 category를 쓰려면 줄바꿈 텍스트 파일을 만들어 `--categories_file`로 지정하세요.
+`--low_margin_threshold`로 low-margin 기준(기본 `0.05`)을 조정할 수 있습니다.
 
 ### Stage D: Physics-aware Resampling
 
 카테고리별 대표 샘플(top-k by `action_match_score`)로 난이도를 추정한 뒤,
 난이도가 높은 카테고리에 더 많은 예산을 배정해 최종 subset을 만듭니다.
+
+결합 난이도는 다음 식으로 계산합니다.
+
+`difficulty = w_failure*failure + w_prior*prior_difficulty + w_ambiguity*ambiguity`
+
+- `failure`: `1 - mean(videocon_physics_score)` (없으면 fallback 사용)
+- `prior_difficulty`: `configs/action_difficulty.yaml`의 category prior
+- `ambiguity`: Stage C margin 기반 저신뢰 비율 (`margin < --ambiguity_threshold`)
 
 ```bash
 python scripts/postcot_physics_resample.py \
@@ -263,12 +274,17 @@ python scripts/postcot_physics_resample.py \
   --output_jsonl outputs/postcot/final_subset.jsonl \
   --output_csv outputs/postcot/final_subset.csv \
   --budget 5000 \
+  --difficulty_config configs/action_difficulty.yaml \
   --difficulty_field videocon_physics_score \
-  --fallback_difficulty inverse_physics_richness
+  --fallback_difficulty inverse_physics_richness \
+  --ambiguity_threshold 0.05 \
+  --min_count 20
 ```
 
 참고:
 - `videocon_physics_score`가 없으면 fallback으로 난이도를 계산합니다.
+- `--min_count` 미달 category는 `--low_priority_mode exclude|bucket` 정책으로 처리합니다.
+- `--difficulty_weights`(예: `failure=0.5,prior=0.3,ambiguity=0.2`)로 결합식 가중치를 조정할 수 있습니다.
 - 논문 재현 목적이면 학습 prompt로 `original_prompt`를 사용하고, `extended`는 보조 실험용으로 함께 보관하세요.
 
 ---
