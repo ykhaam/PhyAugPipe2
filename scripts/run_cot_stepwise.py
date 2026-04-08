@@ -23,8 +23,8 @@ STEP_FIELDS = {
     1: ["sample_id", "original_prompt", "video_path", "parse"],
     2: ["sample_id", "original_prompt", "video_path", "parse"],
     3: ["sample_id", "original_prompt", "video_path", "parse", "reason"],
-    4: ["sample_id", "original_prompt", "video_path", "parse", "reason", "physics_richness"],
-    5: ["sample_id", "original_prompt", "video_path", "parse", "reason", "physics_richness", "extended"],
+    4: ["sample_id", "original_prompt", "video_path", "parse", "reason", "penalty_analysis", "score_breakdown", "physics_richness"],
+    5: ["sample_id", "original_prompt", "video_path", "parse", "reason", "penalty_analysis", "score_breakdown", "physics_richness", "extended"],
 }
 
 
@@ -116,8 +116,15 @@ def main() -> None:
                     prev_row = prev.get(sid, {})
                     parse_obj = prev_row.get("parse", {})
                     reason = prev_row.get("reason", "")
-                    score = pipe.run_step4_score(sample, parse_obj, reason)
-                    payload = {**base, "parse": parse_obj, "reason": reason, "physics_richness": score}
+                    step4 = pipe.run_step4_score(sample, parse_obj, reason)
+                    payload = {
+                        **base,
+                        "parse": parse_obj,
+                        "reason": reason,
+                        "penalty_analysis": step4.get("penalty_analysis", {}),
+                        "score_breakdown": step4.get("score_breakdown", {}),
+                        "physics_richness": float(step4.get("physics_richness", 0.0)),
+                    }
                 else:
                     prev_row = prev.get(sid, {})
                     parse_obj = prev_row.get("parse", {})
@@ -128,6 +135,8 @@ def main() -> None:
                         **base,
                         "parse": parse_obj,
                         "reason": reason,
+                        "penalty_analysis": prev_row.get("penalty_analysis", {}),
+                        "score_breakdown": prev_row.get("score_breakdown", {}),
                         "physics_richness": score,
                         "extended": extended,
                     }
