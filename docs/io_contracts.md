@@ -330,12 +330,23 @@ Backward compatibility:
     - `step5_extended.jsonl` 기반 실험 시 `extended` 선택 가능
   - `--model_name`: sentence-transformer model name
   - `--batch_size`
+  - `--low_margin_threshold` (default: `0.05`)
+  - `--output_stats_json` (category별 margin 통계 JSON)
 
 ### Output
 - `--output_jsonl`: input fields +
   - `action_category` (str)
   - `action_match_score` (float, cosine similarity)
+  - `top1_score` (float)
+  - `top2_score` (float, category가 1개면 `0.0`)
+  - `margin` (float, `top1_score - top2_score`)
 - optional `--output_csv`
+- optional `--output_stats_json`:
+  - key: `action_category`
+  - value:
+    - `count`
+    - `mean_margin`
+    - `low_margin_ratio` (`margin < low_margin_threshold`)
 
 ---
 
@@ -347,16 +358,26 @@ Backward compatibility:
 - optional:
   - `--difficulty_field` (default: `videocon_physics_score`)
   - `--fallback_difficulty`: `inverse_physics_richness` or `uniform`
+  - `--difficulty_config` (default: `configs/action_difficulty.yaml`)
   - `--representative_topk`
   - `--min_per_category`
+  - `--min_count` (coverage 하한)
+  - `--ambiguity_threshold` (default: `0.05`)
+  - `--low_priority_mode`: `exclude` or `bucket`
+  - `--difficulty_weights` (e.g. `failure=0.5,prior=0.3,ambiguity=0.2`)
   - `--seed`
   - `--output_csv`
 
 ### Method Summary
 1. Category별로 `action_match_score` 상위 대표 샘플 선택
-2. `difficulty_field` 평균(없으면 fallback)으로 category difficulty 추정
-3. difficulty 비례로 budget 분배
-4. 각 category에서 상위 매칭 샘플부터 선택
+2. 결합 난이도 계산
+   - `failure = 1 - mean(difficulty_field)` (없으면 fallback 사용)
+   - `prior_difficulty = difficulty_config[action_category]` (없으면 0.5)
+   - `ambiguity = mean(margin < ambiguity_threshold)`
+   - `difficulty = w_failure*failure + w_prior*prior_difficulty + w_ambiguity*ambiguity`
+3. `min_count` 미달 category는 `low_priority_mode` 정책으로 처리
+4. difficulty 비례로 budget 분배
+5. 각 category에서 상위 매칭 샘플부터 선택
 
 ### Output
 - `--output_jsonl`: 최종 sampled subset

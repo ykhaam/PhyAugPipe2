@@ -28,6 +28,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prompt_field", default="original_prompt", choices=["original_prompt", "extended"], help="Text field used for matching")
     p.add_argument("--model_name", default="sentence-transformers/all-MiniLM-L6-v2")
     p.add_argument("--batch_size", type=int, default=128)
+    p.add_argument("--low_margin_threshold", type=float, default=0.05, help="Threshold used for low_margin_ratio (margin < threshold)")
+    p.add_argument("--output_stats_json", default="", help="Optional path to save category-level stats JSON")
     return p.parse_args()
 
 
@@ -80,12 +82,21 @@ def main() -> None:
     prompt_emb = np.concatenate(prompt_emb_chunks, axis=0)
 
     sim = _cosine_sim_matrix(prompt_emb, category_emb)
-    best_idx = np.argmax(sim, axis=1)
-    best_score = np.max(sim, axis=1)
+    sorted_idx = np.argsort(-sim, axis=1)
+    best_idx = sorted_idx[:, 0]
+    best_score = sim[np.arange(len(rows)), best_idx]
+    if len(categories) >= 2:
+        second_idx = sorted_idx[:, 1]
+        second_score = sim[np.arange(len(rows)), second_idx]
+    else:
+        second_score = np.zeros(len(rows), dtype=float)
 
     for i, row in enumerate(rows):
         row["action_category"] = categories[int(best_idx[i])]
         row["action_match_score"] = float(best_score[i])
+        row["top1_score"] = float(best_score[i])
+        row["top2_score"] = float(second_score[i])
+        row["margin"] = float(best_score[i] - second_score[i])
 
     out_jsonl = Path(args.output_jsonl)
     out_jsonl.parent.mkdir(parents=True, exist_ok=True)
@@ -98,8 +109,28 @@ def main() -> None:
         out_csv.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows).to_csv(out_csv, index=False)
 
-    counts = pd.Series([row["action_category"] for row in rows]).value_counts().to_dict()
-    print(json.dumps({"num_samples": len(rows), "num_categories": len(categories), "top_counts": counts}, ensure_ascii=False))
+    df = pd.DataFrame(rows)
+    grouped = df.groupby("action_category", dropna=False)
+    stats = {}
+    for cat, g in grouped:
+        margins = pd.to_numeric(g["margin"], errors="coerce").fillna(0.0)
+        stats[str(cat)] = {
+            "count": int(len(g)),
+            "mean_margin": float(margins.mean()),
+            "low_margin_ratio": float((margins < args.low_margin_threshold).mean()),
+        }
+
+    if args.output_stats_json:
+        out_stats = Path(args.output_stats_json)
+        out_stats.parent.mkdir(parents=True, exist_ok=True)
+        out_stats.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print(json.dumps({
+        "num_samples": len(rows),
+        "num_categories": len(categories),
+        "low_margin_threshold": args.low_margin_threshold,
+        "category_stats": stats,
+    }, ensure_ascii=False))
 
 
 if __name__ == "__main__":
