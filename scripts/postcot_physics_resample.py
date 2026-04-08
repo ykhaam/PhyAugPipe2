@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+VIDEOPHY2_GITHUB_URL = "https://github.com/Hritikbansal/videophy/tree/main/VIDEOPHY2"
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Stage D: physics-aware resampling with category difficulty budgeting")
@@ -47,6 +49,11 @@ def parse_args() -> argparse.Namespace:
             "Use placeholders {input_jsonl} and {output_jsonl}. "
             "Input contains __rep_uid and action_category; output must contain __rep_uid and difficulty_field score."
         ),
+    )
+    p.add_argument(
+        "--videophy2_repo",
+        default=VIDEOPHY2_GITHUB_URL,
+        help="Reference VideoPhy2 repository URL (used for provenance in output summary).",
     )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--input_hist_json", default="", help="Optional Stage C histogram JSON (H_f) to validate category counts")
@@ -402,6 +409,7 @@ def main() -> None:
         "difficulty_components": components,
         "videophy2_eval_command_used": bool(args.videophy2_eval_command),
         "videophy2_eval_stats": videophy2_eval_stats,
+        "videophy2_repo": args.videophy2_repo,
     }, ensure_ascii=False))
 
 

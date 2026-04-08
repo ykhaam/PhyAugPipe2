@@ -285,6 +285,7 @@ python scripts/postcot_physics_resample.py \
 - `N`(total sampling budget)은 `--N`으로 직접 지정할 수 있고, 기존 `--budget`도 동일하게 동작합니다.
 - `videocon_physics_score`가 없으면 fallback으로 난이도를 계산합니다.
 - 대표 샘플(top-nc = `--representative_topk`)을 VideoPhy2로 직접 평가하려면 `--videophy2_eval_command`를 사용하세요.
+  - VideoPhy2 repo: https://github.com/Hritikbansal/videophy/tree/main/VIDEOPHY2
   - 예시:
     `--videophy2_eval_command "python /path/to/videophy2_eval.py --input_jsonl {input_jsonl} --output_jsonl {output_jsonl}"`
   - command 출력 JSONL은 `__rep_uid`와 `--difficulty_field` 컬럼(기본 `videocon_physics_score`)을 포함해야 합니다.

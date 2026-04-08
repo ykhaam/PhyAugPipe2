@@ -386,6 +386,7 @@ Backward compatibility:
   - `--low_priority_mode`: `exclude` or `bucket`
   - `--difficulty_weights` (e.g. `failure=0.5,prior=0.3,ambiguity=0.2`)
   - `--videophy2_eval_command` (optional VideoPhy2 representative evaluation command template with `{input_jsonl}` and `{output_jsonl}`)
+  - `--videophy2_repo` (default: `https://github.com/Hritikbansal/videophy/tree/main/VIDEOPHY2`)
   - `--seed`
   - `--input_hist_json` (H_f 파일; 제공 시 category 누락/예상 count 불일치 검증 수행)
   - `--output_csv`
