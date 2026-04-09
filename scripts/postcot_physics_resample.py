@@ -4,10 +4,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import subprocess
+import tempfile
+import shlex
 
 import numpy as np
 import pandas as pd
-import yaml
+
+VIDEOPHY2_GITHUB_URL = "https://github.com/Hritikbansal/videophy/tree/main/VIDEOPHY2"
 
 
 def parse_args() -> argparse.Namespace:
@@ -15,16 +19,53 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input_jsonl", required=True, help="Action-clustered JSONL")
     p.add_argument("--output_jsonl", required=True)
     p.add_argument("--output_csv", default="")
-    p.add_argument("--budget", type=int, required=True, help="Final number of samples to keep")
+    p.add_argument(
+        "--budget",
+        type=int,
+        default=None,
+        help="Final number of samples to keep (alias: --N).",
+    )
+    p.add_argument(
+        "--N",
+        dest="sampling_budget_n",
+        type=int,
+        default=None,
+        help="Total sampling budget N from the paper. If set, this value is used as the final sample count.",
+    )
     p.add_argument("--difficulty_field", default="videocon_physics_score", help="Field for category difficulty estimation")
     p.add_argument("--fallback_difficulty", choices=["inverse_physics_richness", "uniform"], default="inverse_physics_richness")
-    p.add_argument("--difficulty_config", default="configs/action_difficulty.yaml", help="YAML file containing per-category prior difficulty")
+    p.add_argument("--difficulty_config", default="configs/action_difficulty.yaml", help="Legacy option (ignored in paper-formula allocation)")
     p.add_argument("--representative_topk", type=int, default=20, help="Top-k per category by action_match_score for representative pool")
     p.add_argument("--min_per_category", type=int, default=1)
     p.add_argument("--min_count", type=int, default=1, help="Minimum category count to be included in normal allocation")
     p.add_argument("--ambiguity_threshold", type=float, default=0.05, help="Margin threshold for ambiguity ratio, margin < threshold")
     p.add_argument("--low_priority_mode", choices=["exclude", "bucket"], default="exclude", help="How to handle categories below min_count")
-    p.add_argument("--difficulty_weights", default="failure=0.5,prior=0.3,ambiguity=0.2", help="Comma-separated weights for combined difficulty")
+    p.add_argument("--difficulty_weights", default="failure=0.5,prior=0.3,ambiguity=0.2", help="Legacy option (ignored in paper-formula allocation)")
+    p.add_argument("--tau", type=float, default=1.0, help="Temperature τ for paper allocation: r_k = exp(τ * d_k)")
+    p.add_argument(
+        "--videophy2_eval_command",
+        default="",
+        help=(
+            "Optional shell command template to score representative(top-nc) samples with VideoPhy2. "
+            "Use placeholders {input_jsonl} and {output_jsonl}. "
+            "Input contains __rep_uid and action_category; output must contain __rep_uid and difficulty_field score."
+        ),
+    )
+    p.add_argument(
+        "--videophy2_repo",
+        default=VIDEOPHY2_GITHUB_URL,
+        help="Reference VideoPhy2 repository URL (used for provenance in output summary).",
+    )
+    p.add_argument(
+        "--videophy2_mode",
+        choices=["auto", "command", "off"],
+        default="auto",
+        help="VideoPhy2 representative scoring mode. 'auto' runs the official VideoPhy2 inference bridge by default.",
+    )
+    p.add_argument("--videophy2_root", default="VIDEOPHY2", help="Local path to cloned VideoPhy2 repo")
+    p.add_argument("--videophy2_checkpoint", default="", help="Path to VideoPhy2 checkpoint directory")
+    p.add_argument("--video_path_field", default="video_path", help="Input column name for video path")
+    p.add_argument("--caption_field", default="original_prompt", help="Input column name for caption/prompt")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--input_hist_json", default="", help="Optional Stage C histogram JSON (H_f) to validate category counts")
     return p.parse_args()
@@ -103,68 +144,184 @@ def _estimate_difficulty(rep_df: pd.DataFrame, difficulty_field: str, fallback: 
     return 1.0
 
 
-def _load_prior_difficulty(path: str) -> dict[str, float]:
-    p = Path(path)
-    if not p.exists():
-        return {}
-    raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"difficulty_config must be a mapping, got: {type(raw)}")
-    priors = raw.get("prior_difficulty", raw)
-    if not isinstance(priors, dict):
-        raise ValueError("prior_difficulty must be a mapping")
-    out: dict[str, float] = {}
-    for k, v in priors.items():
-        try:
-            out[str(k)] = float(v)
-        except (TypeError, ValueError):
-            continue
-    return out
-
-
-def _parse_weights(text: str) -> dict[str, float]:
-    out = {"failure": 0.5, "prior": 0.3, "ambiguity": 0.2}
-    if not text:
-        return out
-    for token in text.split(","):
-        token = token.strip()
-        if not token or "=" not in token:
-            continue
-        k, v = token.split("=", 1)
-        k = k.strip()
-        if k in out:
-            out[k] = float(v.strip())
-    total = sum(out.values())
-    if total <= 0:
-        raise ValueError("difficulty_weights must sum to > 0")
-    return {k: v / total for k, v in out.items()}
-
-
-def _mean_failure(rep_df: pd.DataFrame, difficulty_field: str, fallback: str) -> float:
+def _mean_success(rep_df: pd.DataFrame, difficulty_field: str, fallback: str) -> float:
     if difficulty_field in rep_df.columns:
         vals = pd.to_numeric(rep_df[difficulty_field], errors="coerce").dropna()
         if not vals.empty:
-            return float(np.clip(1.0 - vals.mean(), 0.0, 1.0))
-    fallback_diff = _estimate_difficulty(rep_df, difficulty_field, fallback)
-    return float(np.clip(fallback_diff, 0.0, 1.0))
+            return float(np.clip(vals.mean(), 0.0, 1.0))
+    if fallback == "inverse_physics_richness" and "physics_richness" in rep_df.columns:
+        vals = pd.to_numeric(rep_df["physics_richness"], errors="coerce").dropna()
+        if not vals.empty:
+            return float(np.clip(vals.mean(), 0.0, 1.0))
+    return 0.5
+
+def _allocate_with_paper_formula(
+    counts: dict[str, int],
+    difficulties: dict[str, float],
+    budget: int,
+    tau: float,
+) -> tuple[dict[str, int], dict[str, float]]:
+    cats = sorted(counts.keys())
+    d = np.array([float(np.clip(difficulties[c], 0.0, 1.0)) for c in cats], dtype=float)
+    r = np.exp(float(tau) * d)
+    raw = budget * r / np.clip(r.sum(), 1e-12, None)
+    caps = np.array([counts[c] for c in cats], dtype=float)
+    capped = np.minimum(caps, raw)
+    alloc = np.floor(capped).astype(int)
+
+    remainder = budget - int(alloc.sum())
+    while remainder > 0:
+        room = caps - alloc
+        if np.all(room <= 0):
+            break
+        frac = capped - alloc
+        frac[room <= 0] = -1.0
+        idx = int(np.argmax(frac))
+        if frac[idx] < 0:
+            break
+        alloc[idx] += 1
+        remainder -= 1
+
+    out_alloc = {c: int(alloc[i]) for i, c in enumerate(cats)}
+    diag = {
+        "tau": float(tau),
+        "sum_r": float(r.sum()),
+        "raw_quota_sum": float(raw.sum()),
+        "capped_quota_sum": float(capped.sum()),
+        "final_alloc_sum": int(alloc.sum()),
+    }
+    return out_alloc, diag
+
+def _run_videophy2_on_representatives(
+    reps_by_cat: dict[str, pd.DataFrame],
+    difficulty_field: str,
+    eval_command_template: str,
+) -> tuple[dict[str, pd.DataFrame], dict[str, int]]:
+    if not eval_command_template:
+        return reps_by_cat, {"num_representatives_scored": 0, "num_representatives_missing_score": 0}
+
+    flat_parts: list[pd.DataFrame] = []
+    for cat, reps in reps_by_cat.items():
+        tmp = reps.copy()
+        tmp["action_category"] = cat
+        tmp["__rep_uid"] = [f"{cat}::{i}" for i in range(len(tmp))]
+        flat_parts.append(tmp)
+
+    if not flat_parts:
+        return reps_by_cat, {"num_representatives_scored": 0, "num_representatives_missing_score": 0}
+
+    reps_flat = pd.concat(flat_parts, axis=0).copy()
+
+    with tempfile.TemporaryDirectory(prefix="videophy2_eval_") as tmp_dir:
+        input_path = Path(tmp_dir) / "representatives_input.jsonl"
+        output_path = Path(tmp_dir) / "representatives_scored.jsonl"
+        with input_path.open("w", encoding="utf-8") as f:
+            for row in reps_flat.to_dict(orient="records"):
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+        command = eval_command_template.format(
+            input_jsonl=str(input_path),
+            output_jsonl=str(output_path),
+        )
+        proc = subprocess.run(command, shell=True, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "videophy2_eval_command failed with non-zero exit code "
+                f"{proc.returncode}\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+            )
+        if not output_path.exists():
+            raise FileNotFoundError(
+                "videophy2_eval_command did not produce output_jsonl file at "
+                f"{output_path}"
+            )
+
+        scored_rows = []
+        with output_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    scored_rows.append(json.loads(line))
+        if not scored_rows:
+            raise ValueError("videophy2_eval_command output_jsonl is empty")
+        scored_df = pd.DataFrame(scored_rows)
+
+    if "__rep_uid" not in scored_df.columns:
+        raise ValueError("videophy2_eval_command output must include '__rep_uid'")
+    if difficulty_field not in scored_df.columns:
+        raise ValueError(
+            "videophy2_eval_command output must include difficulty field "
+            f"'{difficulty_field}'"
+        )
+
+    score_map: dict[str, float] = {}
+    score_vals = pd.to_numeric(scored_df[difficulty_field], errors="coerce")
+    for uid, val in zip(scored_df["__rep_uid"].astype(str), score_vals):
+        if pd.notna(val):
+            score_map[uid] = float(val)
+
+    updated: dict[str, pd.DataFrame] = {}
+    scored = 0
+    missing = 0
+    for cat, reps in reps_by_cat.items():
+        out = reps.copy()
+        uids = [f"{cat}::{i}" for i in range(len(out))]
+        vals = []
+        for uid in uids:
+            v = score_map.get(uid, np.nan)
+            if np.isnan(v):
+                missing += 1
+            else:
+                scored += 1
+            vals.append(v)
+        out[difficulty_field] = vals
+        updated[cat] = out
+
+    return updated, {
+        "num_representatives_scored": int(scored),
+        "num_representatives_missing_score": int(missing),
+    }
+
+def _resolve_videophy2_eval_command(args: argparse.Namespace) -> str:
+    if args.videophy2_mode == "off":
+        return ""
+    if args.videophy2_mode == "command":
+        if not args.videophy2_eval_command:
+            raise ValueError("--videophy2_mode command requires --videophy2_eval_command")
+        return args.videophy2_eval_command
+    # auto mode
+    if args.videophy2_eval_command:
+        return args.videophy2_eval_command
+    if not args.videophy2_checkpoint:
+        raise ValueError("--videophy2_mode auto requires --videophy2_checkpoint")
+    bridge_script = Path(__file__).with_name("videophy2_eval_bridge.py")
+    return (
+        f"python {shlex.quote(str(bridge_script))} "
+        f"--input_jsonl {{input_jsonl}} --output_jsonl {{output_jsonl}} "
+        f"--videophy2_root {shlex.quote(args.videophy2_root)} "
+        f"--checkpoint {shlex.quote(args.videophy2_checkpoint)} "
+        f"--score_field {shlex.quote(args.difficulty_field)} "
+        f"--video_path_field {shlex.quote(args.video_path_field)} "
+        f"--caption_field {shlex.quote(args.caption_field)}"
+    )
 
 
 def main() -> None:
     args = parse_args()
-    if args.budget <= 0:
-        raise ValueError("--budget must be > 0")
+    budget = args.sampling_budget_n if args.sampling_budget_n is not None else args.budget
+    if budget is None:
+        raise ValueError("Either --budget or --N must be provided")
+    if budget <= 0:
+        raise ValueError("Sampling budget must be > 0 (--budget/--N)")
 
     df = _load_rows(args.input_jsonl)
     if args.input_hist_json:
         _validate_input_hist_json(df, args.input_hist_json)
-    if args.budget > len(df):
-        raise ValueError(f"budget({args.budget}) > input_count({len(df)})")
+    if budget > len(df):
+        raise ValueError(f"budget({budget}) > input_count({len(df)})")
     if args.min_count <= 0:
         raise ValueError("--min_count must be > 0")
 
-    priors = _load_prior_difficulty(args.difficulty_config)
-    weights_cfg = _parse_weights(args.difficulty_weights)
     grouped = {}
+    reps_by_cat: dict[str, pd.DataFrame] = {}
     difficulties = {}
     components = {}
     low_priority_cats: list[str] = []
@@ -176,21 +333,24 @@ def main() -> None:
             if args.low_priority_mode == "exclude":
                 continue
         grouped[cat] = ranked
-        failure = _mean_failure(reps, args.difficulty_field, args.fallback_difficulty)
-        prior = float(np.clip(priors.get(str(cat), 0.5), 0.0, 1.0))
-        margins = pd.to_numeric(ranked.get("margin", pd.Series([], dtype=float)), errors="coerce").dropna()
-        ambiguity = float((margins < args.ambiguity_threshold).mean()) if not margins.empty else 0.0
-        combined = (
-            weights_cfg["failure"] * failure
-            + weights_cfg["prior"] * prior
-            + weights_cfg["ambiguity"] * ambiguity
-        )
-        difficulties[cat] = float(np.clip(combined, 1e-6, None))
+        reps_by_cat[cat] = reps
+
+    resolved_eval_command = _resolve_videophy2_eval_command(args)
+    reps_by_cat, videophy2_eval_stats = _run_videophy2_on_representatives(
+        reps_by_cat=reps_by_cat,
+        difficulty_field=args.difficulty_field,
+        eval_command_template=resolved_eval_command,
+    )
+
+    for cat in sorted(grouped.keys()):
+        ranked = grouped[cat]
+        reps = reps_by_cat[cat]
+        s_f = _mean_success(reps, args.difficulty_field, args.fallback_difficulty)
+        d_k = float(np.clip(1.0 - s_f, 0.0, 1.0))
+        difficulties[cat] = d_k
         components[cat] = {
-            "failure": failure,
-            "prior_difficulty": prior,
-            "ambiguity": ambiguity,
-            "combined": difficulties[cat],
+            "S_f": s_f,
+            "d_k": d_k,
             "count": int(len(ranked)),
         }
 
@@ -198,44 +358,13 @@ def main() -> None:
     n_cat = len(cats)
     if n_cat == 0:
         raise ValueError("No categories available for allocation after min_count/low_priority_mode filtering")
-    base_alloc = {cat: min(args.min_per_category, len(grouped[cat])) for cat in cats}
-    allocated = sum(base_alloc.values())
-    if allocated > args.budget:
-        raise ValueError("min_per_category allocation exceeds budget")
-
-    remaining = args.budget - allocated
-    weights = np.array([difficulties[c] for c in cats], dtype=float)
-    weights = np.clip(weights, 1e-9, None)
-    weights = weights / weights.sum()
-    raw_extra = weights * remaining
-    extra = np.floor(raw_extra).astype(int)
-
-    leftover = remaining - int(extra.sum())
-    if leftover > 0:
-        frac_order = np.argsort(-(raw_extra - extra))
-        for idx in frac_order[:leftover]:
-            extra[idx] += 1
-
-    target_alloc = {cat: base_alloc[cat] + int(extra[i]) for i, cat in enumerate(cats)}
-
-    # Cap by available counts; redistribute deficit greedily
-    deficit = 0
-    for cat in cats:
-        cap = len(grouped[cat])
-        if target_alloc[cat] > cap:
-            deficit += target_alloc[cat] - cap
-            target_alloc[cat] = cap
-
-    if deficit > 0:
-        for cat in sorted(cats, key=lambda c: difficulties[c], reverse=True):
-            room = len(grouped[cat]) - target_alloc[cat]
-            if room <= 0:
-                continue
-            add = min(room, deficit)
-            target_alloc[cat] += add
-            deficit -= add
-            if deficit == 0:
-                break
+    h_f = {cat: int(len(grouped[cat])) for cat in cats}
+    target_alloc, alloc_diag = _allocate_with_paper_formula(
+        counts=h_f,
+        difficulties=difficulties,
+        budget=budget,
+        tau=args.tau,
+    )
 
     selected_parts = []
     for cat in cats:
@@ -262,6 +391,7 @@ def main() -> None:
     print(json.dumps({
         "input_count": int(len(df)),
         "output_count": int(len(selected)),
+        "sampling_budget_n": int(budget),
         "num_categories": n_cat,
         "allocations": target_alloc,
         "difficulty_field": args.difficulty_field,
@@ -271,8 +401,13 @@ def main() -> None:
         "min_count": args.min_count,
         "low_priority_mode": args.low_priority_mode,
         "low_priority_categories": sorted([str(c) for c in low_priority_cats]),
-        "difficulty_weights": weights_cfg,
+        "tau": args.tau,
         "difficulty_components": components,
+        "paper_allocation_diagnostics": alloc_diag,
+        "videophy2_mode": args.videophy2_mode,
+        "videophy2_eval_command_used": bool(resolved_eval_command),
+        "videophy2_eval_stats": videophy2_eval_stats,
+        "videophy2_repo": args.videophy2_repo,
     }, ensure_ascii=False))
 
 

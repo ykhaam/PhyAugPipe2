@@ -252,6 +252,7 @@ python scripts/postcot_action_cluster.py \
   --output_stats_json outputs/postcot/clustered_top15_stats.json
 ```
 
+기본 category 목록은 `configs/action_categories.txt`를 사용합니다.
 커스텀 category를 쓰려면 줄바꿈 텍스트 파일을 만들어 `--categories_file`로 지정하세요.
 `--low_margin_threshold`로 low-margin 기준(기본 `0.05`)을 조정할 수 있습니다.
 
@@ -262,18 +263,24 @@ python scripts/postcot_action_cluster.py \
 
 결합 난이도는 다음 식으로 계산합니다.
 
-`difficulty = w_failure*failure + w_prior*prior_difficulty + w_ambiguity*ambiguity`
+`S_f(k) = mean(VideoPhy2 score on top-nc representatives)`
 
-- `failure`: `1 - mean(videocon_physics_score)` (없으면 fallback 사용)
-- `prior_difficulty`: `configs/action_difficulty.yaml`의 category prior
-- `ambiguity`: Stage C margin 기반 저신뢰 비율 (`margin < --ambiguity_threshold`)
+`d_k = 1 - S_f(k)`
+
+`r_k = exp(τ d_k)`
+
+`H_r(k) = min(H_f(k), N * r_k / Σ_j r_j)`
+
+- `H_f(k)`: Stage C 이후 category별 보유 샘플 수
+- `N`: `--N` (또는 `--budget`)으로 주는 총 예산
+- `τ`: `--tau` (기본 1.0)
 
 ```bash
 python scripts/postcot_physics_resample.py \
   --input_jsonl outputs/postcot/clustered_top15.jsonl \
   --output_jsonl outputs/postcot/final_subset.jsonl \
   --output_csv outputs/postcot/final_subset.csv \
-  --budget 5000 \
+  --N 5000 \
   --difficulty_config configs/action_difficulty.yaml \
   --difficulty_field videocon_physics_score \
   --fallback_difficulty inverse_physics_richness \
@@ -282,9 +289,17 @@ python scripts/postcot_physics_resample.py \
 ```
 
 참고:
+- `N`(total sampling budget)은 `--N`으로 직접 지정할 수 있고, 기존 `--budget`도 동일하게 동작합니다.
 - `videocon_physics_score`가 없으면 fallback으로 난이도를 계산합니다.
+- 대표 샘플(top-nc = `--representative_topk`)은 각 category에서 `action_match_score` 내림차순 상위 샘플로 고릅니다.
+- 기본 모드(`--videophy2_mode auto`)에서는 위 대표 샘플을 VideoPhy2로 자동 평가합니다.
+  - VideoPhy2 repo: https://github.com/Hritikbansal/videophy/tree/main/VIDEOPHY2
+  - 기본은 `--videophy2_mode auto`이며, 이 경우 본 레포의 bridge 스크립트가 VideoPhy2 inference를 자동 호출합니다.
+  - `auto` 모드에서는 최소한 `--videophy2_checkpoint`(체크포인트 경로)와 `--videophy2_root`(로컬 clone 경로, 기본 `VIDEOPHY2`)가 필요합니다.
+  - bridge는 VideoPhy2 출력에 `semantics_adherence_score`와 `physics_commonsense_score`가 둘 다 있으면 두 점수 평균을 최종 category score 계산용 점수로 사용합니다.
+  - 커스텀 러너를 쓰려면 `--videophy2_mode command --videophy2_eval_command "...{input_jsonl}...{output_jsonl}..."`를 사용하세요.
+  - command 출력 JSONL은 `__rep_uid`와 `--difficulty_field` 컬럼(기본 `videocon_physics_score`)을 포함해야 합니다.
 - `--min_count` 미달 category는 `--low_priority_mode exclude|bucket` 정책으로 처리합니다.
-- `--difficulty_weights`(예: `failure=0.5,prior=0.3,ambiguity=0.2`)로 결합식 가중치를 조정할 수 있습니다.
 - 논문 재현 목적이면 학습 prompt로 `original_prompt`를 사용하고, `extended`는 보조 실험용으로 함께 보관하세요.
 
 ---

@@ -324,7 +324,7 @@ Backward compatibility:
 ### Input
 - `--input_jsonl`: Stage B output
 - optional:
-  - `--categories_file`: newline-separated category list
+  - `--categories_file`: newline-separated category list (default: `configs/action_categories.txt`)
   - `--prompt_field`: `original_prompt` or `extended` (default: `original_prompt`)
     - `step4_score.jsonl` 기반이면 `original_prompt` 사용 권장
     - `step5_extended.jsonl` 기반 실험 시 `extended` 선택 가능
@@ -374,7 +374,7 @@ Backward compatibility:
 
 ### Input
 - `--input_jsonl`: Stage C output (must include `action_category`)
-- `--budget`: final sample count
+- `--N` or `--budget`: final sample count (`N` = total sampling budget)
 - optional:
   - `--difficulty_field` (default: `videocon_physics_score`)
   - `--fallback_difficulty`: `inverse_physics_richness` or `uniform`
@@ -384,20 +384,31 @@ Backward compatibility:
   - `--min_count` (coverage 하한)
   - `--ambiguity_threshold` (default: `0.05`)
   - `--low_priority_mode`: `exclude` or `bucket`
-  - `--difficulty_weights` (e.g. `failure=0.5,prior=0.3,ambiguity=0.2`)
+  - `--tau` (`r_k = exp(τ d_k)`의 temperature)
+  - `--difficulty_weights` (legacy; paper-formula allocation에서는 미사용)
+  - `--videophy2_mode` (`auto`|`command`|`off`, default `auto`)
+  - `--videophy2_eval_command` (optional VideoPhy2 representative evaluation command template with `{input_jsonl}` and `{output_jsonl}`)
+  - `--videophy2_repo` (default: `https://github.com/Hritikbansal/videophy/tree/main/VIDEOPHY2`)
+  - `--videophy2_root` (default: `VIDEOPHY2`, local clone path used in `auto` mode)
+  - `--videophy2_checkpoint` (required in `auto` mode)
+  - `--video_path_field`, `--caption_field` (bridge input mapping, default `video_path`, `original_prompt`)
   - `--seed`
   - `--input_hist_json` (H_f 파일; 제공 시 category 누락/예상 count 불일치 검증 수행)
   - `--output_csv`
 
 ### Method Summary
-1. Category별로 `action_match_score` 상위 대표 샘플 선택
+1. Category별로 `action_match_score` 상위 대표 샘플(top-nc) 선택
+   - 기본(`--videophy2_mode auto`)으로 대표 샘플을 VideoPhy2로 채점 후 `difficulty_field`로 사용
+   - VideoPhy2 출력에 semantic/physics 두 점수가 함께 있으면 bridge에서 평균으로 통합 score를 생성
+   - `command` 모드에서는 사용자 제공 커맨드 템플릿으로 채점
+   - `off` 모드에서는 외부 채점 없이 기존 필드/ fallback 사용
 2. 결합 난이도 계산
-   - `failure = 1 - mean(difficulty_field)` (없으면 fallback 사용)
-   - `prior_difficulty = difficulty_config[action_category]` (없으면 0.5)
-   - `ambiguity = mean(margin < ambiguity_threshold)`
-   - `difficulty = w_failure*failure + w_prior*prior_difficulty + w_ambiguity*ambiguity`
-3. `min_count` 미달 category는 `low_priority_mode` 정책으로 처리
-4. difficulty 비례로 budget 분배
+   - `S_f(k) = mean(difficulty_field on representative samples)`
+   - `d_k = 1 - S_f(k)`
+   - `r_k = exp(τ d_k)`
+3. quota 계산
+   - `H_r(k) = min(H_f(k), N * r_k / Σ_j r_j)`
+4. `H_r(k)`를 정수 샘플 수로 라운딩/잔여 분배하여 category별 최종 할당 확정
 5. 각 category에서 상위 매칭 샘플부터 선택
 
 ### Output

@@ -12,11 +12,7 @@ import torch
 from sentence_transformers import SentenceTransformer
 
 
-DEFAULT_ACTION_CATEGORIES = [
-    "falling", "throwing", "bouncing", "collision", "sliding", "rolling", "pouring",
-    "breaking", "explosion", "burning", "floating", "sinking", "lifting", "pushing",
-    "pulling", "spinning", "stretching", "deformation", "fluid flow", "projectile motion",
-]
+DEFAULT_CATEGORIES_FILE = "configs/action_categories.txt"
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,7 +20,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input_jsonl", required=True, help="Filtered JSONL from Stage B")
     p.add_argument("--output_jsonl", required=True)
     p.add_argument("--output_csv", default="")
-    p.add_argument("--categories_file", default="", help="Optional newline-separated action categories")
+    p.add_argument(
+        "--categories_file",
+        default=DEFAULT_CATEGORIES_FILE,
+        help=f"Newline-separated action categories file (default: {DEFAULT_CATEGORIES_FILE})",
+    )
     p.add_argument("--prompt_field", default="original_prompt", choices=["original_prompt", "extended"], help="Text field used for matching")
     p.add_argument("--model_name", default="sentence-transformers/all-MiniLM-L6-v2")
     p.add_argument("--batch_size", type=int, default=128)
@@ -47,7 +47,7 @@ def _load_rows(path: str) -> list[dict]:
 
 def _load_categories(path: str) -> list[str]:
     if not path:
-        return DEFAULT_ACTION_CATEGORIES
+        raise ValueError("categories_file is required")
     lines = [ln.strip() for ln in Path(path).read_text(encoding="utf-8").splitlines()]
     cats = [ln for ln in lines if ln and not ln.startswith("#")]
     if not cats:
