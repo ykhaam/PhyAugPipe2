@@ -186,7 +186,8 @@ python scripts/run_cot_scoring.py \
 ### Stepwise + Multi-GPU 일괄 실행 (권장, `run_cot_stepwise_all.sh`)
 
 `run_cot_scoring.py` 단일 실행이 불안정할 때는 아래 스크립트로 **CSV를 GPU 수만큼 자동 분할**해서 병렬 실행하세요.
-각 shard의 결과를 마지막에 자동 merge합니다.
+각 step(1~5)을 순차 실행하며, **이전 step의 JSONL을 다음 step 입력으로 자동 연결**합니다.
+각 step의 shard 결과를 step 디렉터리에 merge하고, step5 완료 시 최종 merged 파일도 루트에 복사합니다.
 
 ```bash
 bash scripts/run_cot_stepwise_all.sh \
@@ -205,7 +206,21 @@ bash scripts/run_cot_stepwise_all.sh \
 - `outputs/scored_stepwise/scored_merged.csv`
 - `outputs/scored_stepwise/scored_merged.jsonl`
 - `outputs/scored_stepwise/scored_merged.steps.jsonl`
-- shard 로그: `outputs/scored_stepwise/logs/part*.log`
+- step별 결과: `outputs/scored_stepwise/step{1..5}/...`
+- shard 로그: `outputs/scored_stepwise/step{1..5}/logs/part*.log`
+
+특정 step만 단독 실행하려면:
+
+```bash
+bash scripts/run_cot_stepwise_all.sh \
+  --subset_csv data/subsets/local_subset.csv \
+  --output_dir outputs/scored_stepwise \
+  --gpus 0,1 \
+  --mode step \
+  --step 3
+```
+
+> `--step N (N>1)` 실행 시 `outputs/scored_stepwise/step{N-1}/shards/scored.part*.jsonl`이 있어야 합니다.
 
 
 ## 6) Post-CoT 파이프라인 (Stage B/C/D)
