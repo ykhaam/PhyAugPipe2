@@ -117,50 +117,7 @@ python scripts/build_local_pairs_csv.py \
 
 ---
 
-## 4) 단계별 실행 (강력 권장)
-
-한 번에 돌리지 않고, 각 단계 결과를 확인하면서 디버깅합니다.
-- Stepwise 모드에서도 Step1~5 모두 공통 CoT 템플릿을 기반으로 동작하며, Step3~5도 프레임 증거를 함께 사용합니다.
-
-```bash
-# Step 1: Element Parsing
-python scripts/run_cot_stepwise.py \
-  --step 1 \
-  --subset_csv data/subsets/local_subset.csv \
-  --output_jsonl outputs/steps/step1_parse.jsonl
-
-# Step 2: Vision Checking
-python scripts/run_cot_stepwise.py \
-  --step 2 \
-  --subset_csv data/subsets/local_subset.csv \
-  --input_jsonl outputs/steps/step1_parse.jsonl \
-  --output_jsonl outputs/steps/step2_checked.jsonl
-
-# Step 3: Physics Reasoning
-python scripts/run_cot_stepwise.py \
-  --step 3 \
-  --subset_csv data/subsets/local_subset.csv \
-  --input_jsonl outputs/steps/step2_checked.jsonl \
-  --output_jsonl outputs/steps/step3_reason.jsonl
-
-# Step 4: Data Scoring
-python scripts/run_cot_stepwise.py \
-  --step 4 \
-  --subset_csv data/subsets/local_subset.csv \
-  --input_jsonl outputs/steps/step3_reason.jsonl \
-  --output_jsonl outputs/steps/step4_score.jsonl
-
-# Step 5: Prompt Extending
-python scripts/run_cot_stepwise.py \
-  --step 5 \
-  --subset_csv data/subsets/local_subset.csv \
-  --input_jsonl outputs/steps/step4_score.jsonl \
-  --output_jsonl outputs/steps/step5_extended.jsonl
-```
-
-각 step 출력(JSONL)을 직접 열어보며 중간결과를 검증할 수 있습니다.
-
----
+## 4) CoT scoring 실행 (권장)
 
 ### Step 4 checklist-driven scoring (update)
 
@@ -180,30 +137,76 @@ python scripts/run_cot_stepwise.py \
 가능합니다. 다만 속도가 매우 느릴 수 있어서 먼저 샘플/프레임 수를 줄여 확인하세요.
 
 ```bash
-python scripts/run_cot_stepwise.py \
-  --step 1 \
+python scripts/run_cot_scoring.py \
   --subset_csv data/subsets/local_subset.csv \
-  --output_jsonl outputs/steps/step1_parse_cpu.jsonl \
+  --output_csv outputs/scored/scored_cpu.csv \
+  --output_jsonl outputs/scored/scored_cpu.jsonl \
   --device cpu \
   --max_samples 5 \
   --num_frames 4 \
   --max_new_tokens 256
 ```
 
-일괄 실행도 동일하게 `--device cpu`를 주면 됩니다.
-
 ---
 
-## 5) 참고: 기존 일괄 실행
+## 5) 실행 예시
 
 ```bash
 python scripts/run_cot_scoring.py \
   --subset_csv data/subsets/local_subset.csv \
   --output_csv outputs/scored/scored.csv \
   --output_jsonl outputs/scored/scored.jsonl \
+  --output_steps_dir outputs/steps/scored_run \
+  --log_file outputs/logs/cot_scoring.log \
   --model_name Qwen/Qwen2.5-VL-3B-Instruct \
   --num_frames 8 \
   --max_new_tokens 512
+```
+
+### Multi-GPU 실행 예시
+
+아래처럼 GPU를 여러 장 지정하고 `--device auto --device_map auto`를 사용하면
+`transformers`의 device map 분산 로딩으로 멀티 GPU 실행이 가능합니다.
+
+```bash
+python scripts/run_cot_scoring.py \
+  --subset_csv data/subsets/local_subset.csv \
+  --output_csv outputs/scored/scored_mgpu.csv \
+  --output_jsonl outputs/scored/scored_mgpu.jsonl \
+  --output_steps_dir outputs/steps/scored_mgpu \
+  --log_file outputs/logs/cot_scoring_mgpu.log \
+  --model_name Qwen/Qwen2.5-VL-3B-Instruct \
+  --num_frames 8 \
+  --max_new_tokens 512 \
+  --device auto \
+  --cuda_visible_devices 0,1 \
+  --device_map auto \
+  --max_memory_per_gpu 70GiB
+```
+
+`--output_steps_dir`를 주면 아래 중간 산출물이 생성됩니다.
+- `step1_parse.jsonl`
+- `step2_checked.jsonl`
+- `step3_reason.jsonl`
+- `step4_score.jsonl`
+- `step5_extended.jsonl`
+
+`--log_file`를 주면 sample 단위 진행/에러 로그가 파일로 저장됩니다.
+
+실사용 예시(WISA rigidbody):
+```bash
+python scripts/run_cot_scoring.py \
+  --subset_csv data/wisa_rigidbody/wisa_rigidbody.csv \
+  --output_csv outputs/scored/cot_260410_wisa_rigidbody.csv \
+  --output_jsonl outputs/scored/cot_260410_wisa_rigidbody.jsonl \
+  --output_steps_dir outputs/steps/cot_260410_wisa_rigidbody \
+  --log_file outputs/logs/cot_260410_wisa_rigidbody.log \
+  --model_name Qwen/Qwen2.5-VL-7B-Instruct \
+  --num_frames 8 \
+  --max_new_tokens 512 \
+  --device auto \
+  --cuda_visible_devices 0,1 \
+  --device_map auto
 ```
 
 ---
@@ -211,8 +214,7 @@ python scripts/run_cot_scoring.py \
 
 ## 6) Post-CoT 파이프라인 (Stage B/C/D)
 
-`step4_score.jsonl` 이후 단계는 **후처리(post-processing)** 로 분리되어 있으며, threshold를 코드에 고정하지 않습니다.
-(`step5_extended.jsonl`도 입력 가능하지만, 논문 재현 관점에서는 원문 prompt 기반의 step4 점수 결과를 권장)
+`scored.jsonl` 이후 단계는 **후처리(post-processing)** 로 분리되어 있으며, threshold를 코드에 고정하지 않습니다.
 
 ### Stage B: Threshold Filtering
 
@@ -221,14 +223,14 @@ python scripts/run_cot_scoring.py \
 ```bash
 # 예시 1) fixed threshold
 python scripts/postcot_threshold_filter.py \
-  --input_jsonl outputs/steps/step4_score.jsonl \
+  --input_jsonl outputs/scored/scored.jsonl \
   --output_jsonl outputs/postcot/filtered_t06.jsonl \
   --output_csv outputs/postcot/filtered_t06.csv \
   --threshold 0.6
 
 # 예시 2) top quantile
 python scripts/postcot_threshold_filter.py \
-  --input_jsonl outputs/steps/step4_score.jsonl \
+  --input_jsonl outputs/scored/scored.jsonl \
   --output_jsonl outputs/postcot/filtered_top15.jsonl \
   --output_csv outputs/postcot/filtered_top15.csv \
   --top_quantile 0.15

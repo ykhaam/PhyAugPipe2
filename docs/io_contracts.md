@@ -136,144 +136,18 @@
 
 ---
 
-## 4) `scripts/run_cot_stepwise.py`
-
-- Note: Step1~5 모두 프레임 증거를 사용하며, Stepwise 경로도 CoT 템플릿 기반 규칙을 따릅니다.
-
-
-## Step 1 (Element Parsing)
-### Input
-- `--subset_csv`: canonical pair CSV
-- `--step 1`
-- `--device`: `auto|cpu|cuda` (CPU 점검 시 `cpu`)
-
-### Output JSONL (`--output_jsonl`)
-```json
-{
-  "sample_id": "string",
-  "original_prompt": "string",
-  "video_path": "string",
-  "parse": {
-    "entities": [],
-    "actions": [],
-    "forces": [],
-    "outcomes": []
-  }
-}
-```
-
-## Step 2 (Vision Checking)
-### Input
-- `--subset_csv`: canonical pair CSV
-- `--step 2`
-- `--input_jsonl`: step1 output
-
-### Output JSONL
-- step1과 동일한 구조, `parse`가 vision-checked 버전으로 갱신됨.
-
-## Step 3 (Physics Reasoning)
-### Input
-- `--subset_csv`
-- `--step 3`
-- `--input_jsonl`: step2 output
-
-### Output JSONL
-```json
-{
-  "sample_id": "string",
-  "original_prompt": "string",
-  "video_path": "string",
-  "parse": {"entities": [], "actions": [], "forces": [], "outcomes": []},
-  "reason": "string"
-}
-```
-
-## Step 4 (Data Scoring)
-### Input
-- `--subset_csv`
-- `--step 4`
-- `--input_jsonl`: step3 output
-
-### Output JSONL
-```json
-{
-  "sample_id": "string",
-  "original_prompt": "string",
-  "video_path": "string",
-  "parse": {...},
-  "reason": "string",
-  "positive_checklist": {
-    "multiple_physical_entities_present": false,
-    "explicit_entity_interaction_present": false,
-    "chain_or_dependent_interaction_present": false,
-    "explicit_force_present": false,
-    "explicit_outcome_present": false,
-    "force_outcome_causally_linked": false,
-    "cause_effect_relation_present": false,
-    "multi_step_causality_present": false,
-    "reason_supported_by_visible_process": false,
-    "interaction_keywords": [],
-    "force_keywords": [],
-    "outcome_keywords": [],
-    "causal_keywords": []
-  },
-  "penalty_analysis": {
-    "camera_motion_dominant": false,
-    "stylized_rendering": false,
-    "static_aftermath": false,
-    "showcase_without_interaction": false,
-    "penalty_keywords": []
-  },
-  "score_breakdown": {
-    "entity_interaction_score": 0.0,
-    "force_outcome_score": 0.0,
-    "causal_clarity_score": 0.0,
-    "penalty_score": 0.0
-  },
-  "physics_richness": 0.0
-}
-```
-
-## Step 5 (Prompt Extending)
-### Input
-- `--subset_csv`
-- `--step 5`
-- `--input_jsonl`: step4 output
-
-### Output JSONL
-```json
-{
-  "sample_id": "string",
-  "original_prompt": "string",
-  "video_path": "string",
-  "parse": {...},
-  "reason": "string",
-  "positive_checklist": {...},
-  "penalty_analysis": {...},
-  "score_breakdown": {...},
-  "physics_richness": 0.0,
-  "extended": "string"
-}
-```
-
-### Error Record (all steps)
-에러 발생 시 다음 형태로 기록됨.
-```json
-{
-  "sample_id": "string",
-  "original_prompt": "string",
-  "video_path": "string",
-  "error": "exception message"
-}
-```
-
----
-
-## 5) `scripts/run_cot_scoring.py` (all-in-one)
+## 4) `scripts/run_cot_scoring.py` (all-in-one)
 
 ### Input
 - `--subset_csv`: canonical pair CSV
 - model/runtime args: `--model_name`, `--num_frames`, `--max_new_tokens`, `--device`
+- multi-GPU optional args:
+  - `--cuda_visible_devices` (예: `0,1`)
+  - `--device_map` (default: `auto`)
+  - `--max_memory_per_gpu` (예: `70GiB`)
+- logging/intermediate optional args:
+  - `--log_file` (run log file path)
+  - `--output_steps_dir` (step1~5 intermediate JSONL output directory)
 
 ### Outputs
 1. `--output_csv`
@@ -290,22 +164,28 @@
      - `score_breakdown_json` (json string)
 2. `--output_jsonl`
    - raw model 결과 (또는 error record)
+3. optional `--output_steps_dir`
+   - `step1_parse.jsonl`
+   - `step2_checked.jsonl`
+   - `step3_reason.jsonl`
+   - `step4_score.jsonl`
+   - `step5_extended.jsonl`
 
 ### Step 4 deterministic scoring formulas
 - `entity_interaction_score = clamp(0.25*multiple + 0.45*explicit_interaction + 0.30*chain_interaction, 0, 1)`
 - `force_outcome_score = clamp(0.30*explicit_force + 0.30*explicit_outcome + 0.40*force_outcome_linked, 0, 1)`
 - `causal_clarity_score = clamp(0.35*cause_effect + 0.30*multi_step + 0.35*visible_process_supported, 0, 1)`
-- `physics_richness = clamp(0.30*entity_interaction + 0.30*force_outcome + 0.30*causal_clarity - 0.10*penalty_score, 0, 1)`
+- `physics_richness = clamp(0.30*entity_interaction + 0.30*force_outcome + 0.30*causal_clarity - 0.05*penalty_score, 0, 1)`
 
 Backward compatibility:
 - If old Step 4 JSON lacks `positive_checklist`, pipeline uses conservative defaults (`False` + empty keywords), so execution still succeeds.
 
 ---
 
-## 6) `scripts/postcot_threshold_filter.py` (Stage B)
+## 5) `scripts/postcot_threshold_filter.py` (Stage B)
 
 ### Input
-- `--input_jsonl`: scored JSONL (`step4_score.jsonl` 권장, `step5_extended.jsonl`도 가능)
+- `--input_jsonl`: scored JSONL (`run_cot_scoring.py`의 `--output_jsonl`, 예: `outputs/scored/scored.jsonl`)
 - filtering mode (exactly one):
   - `--threshold <float>`: `physics_richness >= threshold`
   - `--top_quantile <float>`: top q fraction by `physics_richness`
@@ -319,15 +199,15 @@ Backward compatibility:
 
 ---
 
-## 7) `scripts/postcot_action_cluster.py` (Stage C)
+## 6) `scripts/postcot_action_cluster.py` (Stage C)
 
 ### Input
 - `--input_jsonl`: Stage B output
 - optional:
   - `--categories_file`: newline-separated category list
   - `--prompt_field`: `original_prompt` or `extended` (default: `original_prompt`)
-    - `step4_score.jsonl` 기반이면 `original_prompt` 사용 권장
-    - `step5_extended.jsonl` 기반 실험 시 `extended` 선택 가능
+    - 기본 `scored.jsonl`에서는 `original_prompt` 사용 권장
+    - 확장 프롬프트 실험 데이터가 있으면 `extended` 선택 가능
   - `--model_name`: sentence-transformer model name
   - `--batch_size`
   - `--low_margin_threshold` (default: `0.05`)
