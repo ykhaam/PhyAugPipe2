@@ -360,15 +360,6 @@ class CoTFilteringPipeline:
                 ["causing", "causes", "because", "therefore", "leads to", "results in", "so that"],
             )
 
-        if positive_checklist["explicit_entity_interaction_present"] and not positive_checklist["interaction_keywords"]:
-            positive_checklist["interaction_keywords"] = ["visible interaction"]
-        if positive_checklist["explicit_force_present"] and not positive_checklist["force_keywords"]:
-            positive_checklist["force_keywords"] = ["visible force"]
-        if positive_checklist["explicit_outcome_present"] and not positive_checklist["outcome_keywords"]:
-            positive_checklist["outcome_keywords"] = ["visible outcome"]
-        if positive_checklist["cause_effect_relation_present"] and not positive_checklist["causal_keywords"]:
-            positive_checklist["causal_keywords"] = ["cause-effect"]
-
         if not positive_checklist["explicit_entity_interaction_present"] and len(entities) >= 2 and len(actions) > 0:
             positive_checklist["explicit_entity_interaction_present"] = True
         if not positive_checklist["explicit_force_present"]:
@@ -450,7 +441,12 @@ class CoTFilteringPipeline:
     def run_step2_vision_check(self, sample: SampleRecord, parse_obj: Dict[str, Any]) -> Dict[str, Any]:
         instruction = self._step_instruction(
             2,
-            "Given current parse, remove hallucinations and add clearly visible missing items. Return JSON with key 'parse'.",
+            (
+                "Given current parse, explicitly compare EACH parsed entity/action/force/outcome with sampled frames and original prompt. "
+                "Remove hallucinated or unverifiable items; add clearly visible missing entities/interactions. "
+                "Do a true correction pass (not a copy pass). "
+                "Return JSON with key 'parse' containing the corrected result."
+            ),
         )
         out = self._generate(
             self._messages_with_frames(instruction, sample, extra_payload={"current_parse": parse_obj})
@@ -480,7 +476,7 @@ class CoTFilteringPipeline:
                 "cause_effect_relation_present, multi_step_causality_present, reason_supported_by_visible_process. "
                 "'positive_checklist' must include short keyword lists (<=5 each): interaction_keywords, "
                 "force_keywords, outcome_keywords, causal_keywords. "
-                "If a related boolean is true, provide at least one grounded keyword for that category. "
+                "Only include grounded keywords that are explicitly supported by frames/prompt; do not fabricate placeholders. "
                 "'penalty_analysis' must include booleans: camera_motion_dominant, stylized_rendering, "
                 "static_aftermath, showcase_without_interaction; plus penalty_keywords (list, <=5 short phrases). "
                 "Do NOT rely on generic motion; verify real object interaction, explicit force/outcome, and grounded visible causal process. "
