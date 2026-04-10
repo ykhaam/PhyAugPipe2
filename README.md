@@ -183,6 +183,43 @@ python scripts/run_cot_scoring.py \
 ---
 
 
+### Stepwise + Multi-GPU 일괄 실행 (권장, `run_cot_stepwise_all.sh`)
+
+예전 방식처럼 **step을 분리 실행**하고, **이전 step의 JSONL을 다음 step 입력으로 연결**하려면 아래를 사용하세요.
+내부적으로 shard(part) 단위로 `step1 -> step2 -> ...` 입력 체인을 유지합니다.
+
+```bash
+bash scripts/run_cot_stepwise_all.sh \
+  --subset_csv data/subsets/local_subset.csv \
+  --output_dir outputs/stepwise_all \
+  --gpus 0,1,2,3 \
+  --steps 1,2,3,4,5 \
+  --model_name Qwen/Qwen2.5-VL-3B-Instruct \
+  --num_frames 8 \
+  --max_new_tokens 512 \
+  --device auto \
+  --device_map auto \
+  --max_memory_per_gpu 70GiB
+```
+
+주요 출력:
+- step별 병합: `outputs/stepwise_all/step1.merged.jsonl` ... `step5.merged.jsonl`
+- 최종 결과: `outputs/stepwise_all/final_merged.jsonl`
+- part별 중간 파일: `outputs/stepwise_all/shards/step{N}.part{K}.jsonl`
+- 로그: `outputs/stepwise_all/logs/step{N}.part{K}.log`
+
+필요하면 단일 step만도 실행 가능:
+
+```bash
+python scripts/run_cot_stepwise.py \
+  --step 3 \
+  --subset_csv outputs/stepwise_all/shards/subset.part0.csv \
+  --input_jsonl outputs/stepwise_all/shards/step2.part0.jsonl \
+  --output_jsonl outputs/stepwise_all/shards/step3.part0.jsonl \
+  --cuda_visible_devices 0
+```
+
+
 ## 6) Post-CoT 파이프라인 (Stage B/C/D)
 
 `scored.jsonl` 이후 단계는 **후처리(post-processing)** 로 분리되어 있으며, threshold를 코드에 고정하지 않습니다.
