@@ -23,6 +23,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--subset_csv", required=True, help="CSV with sample_id, original_prompt, video_path")
     p.add_argument("--output_csv", required=True, help="Scored CSV output")
     p.add_argument("--output_jsonl", required=True, help="Raw JSONL output")
+    p.add_argument(
+        "--input_jsonl",
+        default="",
+        help="Optional previous-step JSONL state input (for stepwise chaining)",
+    )
     p.add_argument("--model_name", default="Qwen/Qwen2.5-VL-3B-Instruct")
     p.add_argument("--num_frames", type=int, default=8)
     p.add_argument("--max_new_tokens", type=int, default=512)
@@ -47,11 +52,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print per-step summary to stdout while running",
     )
+    p.add_argument("--start_step", type=int, default=1, help="Start step index (1~5)")
+    p.add_argument("--end_step", type=int, default=5, help="End step index (1~5)")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if not (1 <= args.start_step <= 5 and 1 <= args.end_step <= 5 and args.start_step <= args.end_step):
+        raise ValueError("--start_step/--end_step must satisfy 1 <= start <= end <= 5")
     if args.cuda_visible_devices:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
 
@@ -61,6 +70,21 @@ def main() -> None:
     df = pd.read_csv(args.subset_csv)
     if args.max_samples > 0:
         df = df.head(args.max_samples)
+
+    prev_state_by_sample_id = {}
+    if args.input_jsonl:
+        in_path = Path(args.input_jsonl)
+        if not in_path.exists():
+            raise FileNotFoundError(f"input_jsonl not found: {args.input_jsonl}")
+        with in_path.open("r", encoding="utf-8") as fin:
+            for line in fin:
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                sid = str(obj.get("sample_id", ""))
+                if sid:
+                    prev_state_by_sample_id[sid] = obj
 
     pipe = CoTFilteringPipeline(
         PipelineConfig(
@@ -124,84 +148,110 @@ def main() -> None:
             )
             _append_log(f_log, f"sample_start sample_id={sample.sample_id} video_path={sample.video_path}")
             try:
-                parse_step1 = pipe.run_step1_parse(sample)
-                f_step_jsonl.write(
-                    json.dumps(
-                        {
-                            "sample_id": sample.sample_id,
-                            "video_path": sample.video_path,
-                            "step": 1,
-                            "name": "parse_initial",
-                            "result": {"parse": parse_step1},
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
+                prev_state = prev_state_by_sample_id.get(sample.sample_id, {})
+                parse_step1 = prev_state.get("parse")
+                parse_step2 = prev_state.get("parse")
+                reason_step3 = str(prev_state.get("reason", ""))
+                step4 = {
+                    "positive_checklist": prev_state.get("positive_checklist", {}),
+                    "penalty_analysis": prev_state.get("penalty_analysis", {}),
+                    "score_breakdown": prev_state.get("score_breakdown", {}),
+                    "physics_richness": float(prev_state.get("physics_richness", 0.0)),
+                }
+                extended_step5 = str(prev_state.get("extended", ""))
 
-                parse_step2 = pipe.run_step2_vision_check(sample, parse_step1)
-                f_step_jsonl.write(
-                    json.dumps(
-                        {
-                            "sample_id": sample.sample_id,
-                            "video_path": sample.video_path,
-                            "step": 2,
-                            "name": "parse_vision_checked",
-                            "result": {"parse": parse_step2},
-                        },
-                        ensure_ascii=False,
+                if args.start_step <= 1 <= args.end_step:
+                    parse_step1 = pipe.run_step1_parse(sample)
+                    parse_step2 = parse_step1
+                    f_step_jsonl.write(
+                        json.dumps(
+                            {
+                                "sample_id": sample.sample_id,
+                                "video_path": sample.video_path,
+                                "step": 1,
+                                "name": "parse_initial",
+                                "result": {"parse": parse_step1},
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
                     )
-                    + "\n"
-                )
-
-                reason_step3 = pipe.run_step3_reason(sample, parse_step2)
-                f_step_jsonl.write(
-                    json.dumps(
-                        {
-                            "sample_id": sample.sample_id,
-                            "video_path": sample.video_path,
-                            "step": 3,
-                            "name": "reason",
-                            "result": {"reason": reason_step3},
-                        },
-                        ensure_ascii=False,
+                if args.start_step <= 2 <= args.end_step:
+                    if not isinstance(parse_step2, dict):
+                        raise ValueError("Step2 requires parse object from step1/input_jsonl")
+                    parse_step2 = pipe.run_step2_vision_check(sample, parse_step2)
+                    f_step_jsonl.write(
+                        json.dumps(
+                            {
+                                "sample_id": sample.sample_id,
+                                "video_path": sample.video_path,
+                                "step": 2,
+                                "name": "parse_vision_checked",
+                                "result": {"parse": parse_step2},
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
                     )
-                    + "\n"
-                )
-
-                step4 = pipe.run_step4_score(sample, parse_step2, reason_step3)
-                f_step_jsonl.write(
-                    json.dumps(
-                        {
-                            "sample_id": sample.sample_id,
-                            "video_path": sample.video_path,
-                            "step": 4,
-                            "name": "score",
-                            "result": step4,
-                        },
-                        ensure_ascii=False,
+                if args.start_step <= 3 <= args.end_step:
+                    if not isinstance(parse_step2, dict):
+                        raise ValueError("Step3 requires parse object from step2/input_jsonl")
+                    reason_step3 = pipe.run_step3_reason(sample, parse_step2)
+                    f_step_jsonl.write(
+                        json.dumps(
+                            {
+                                "sample_id": sample.sample_id,
+                                "video_path": sample.video_path,
+                                "step": 3,
+                                "name": "reason",
+                                "result": {"reason": reason_step3},
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
                     )
-                    + "\n"
-                )
-
-                extended_step5 = pipe.run_step5_extend(sample, parse_step2, reason_step3)
-                f_step_jsonl.write(
-                    json.dumps(
-                        {
-                            "sample_id": sample.sample_id,
-                            "video_path": sample.video_path,
-                            "step": 5,
-                            "name": "extend",
-                            "result": {"extended": extended_step5},
-                        },
-                        ensure_ascii=False,
+                if args.start_step <= 4 <= args.end_step:
+                    if not isinstance(parse_step2, dict):
+                        raise ValueError("Step4 requires parse object from step2/input_jsonl")
+                    if not reason_step3:
+                        raise ValueError("Step4 requires reason from step3/input_jsonl")
+                    step4 = pipe.run_step4_score(sample, parse_step2, reason_step3)
+                    f_step_jsonl.write(
+                        json.dumps(
+                            {
+                                "sample_id": sample.sample_id,
+                                "video_path": sample.video_path,
+                                "step": 4,
+                                "name": "score",
+                                "result": step4,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
                     )
-                    + "\n"
-                )
+                if args.start_step <= 5 <= args.end_step:
+                    if not isinstance(parse_step2, dict):
+                        raise ValueError("Step5 requires parse object from step2/input_jsonl")
+                    if not reason_step3:
+                        raise ValueError("Step5 requires reason from step3/input_jsonl")
+                    extended_step5 = pipe.run_step5_extend(sample, parse_step2, reason_step3)
+                    f_step_jsonl.write(
+                        json.dumps(
+                            {
+                                "sample_id": sample.sample_id,
+                                "video_path": sample.video_path,
+                                "step": 5,
+                                "name": "extend",
+                                "result": {"extended": extended_step5},
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
 
                 result = CoTResult(
                     original=sample.original_prompt,
-                    parse=ParsedElements(**parse_step2),
+                    parse=ParsedElements(**pipe._normalize_parse(parse_step2)),
                     reason=reason_step3,
                     extended=extended_step5,
                     physics_richness=float(step4.get("physics_richness", 0.0)),
@@ -226,6 +276,7 @@ def main() -> None:
 
                 payload = {
                     "sample_id": sample.sample_id,
+                    "original_prompt": sample.original_prompt,
                     "video_path": sample.video_path,
                     **result.model_dump(),
                 }

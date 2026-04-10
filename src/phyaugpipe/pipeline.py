@@ -121,7 +121,13 @@ class CoTFilteringPipeline:
                 trust_remote_code=True,
                 **extra_kwargs,
             )
-            self.input_device = self.model.device
+            # NOTE:
+            #   When device_map="auto", `self.model.device` can be `cpu` even if the
+            #   executable blocks are dispatched to CUDA devices. In that case feeding
+            #   CPU tensors can trigger mixed-device errors at generation time
+            #   (e.g. index_select between cuda:0 and cpu).
+            #   Use the first parameter device as generation input device.
+            self.input_device = next(self.model.parameters()).device
 
         self.template = Path(self.config.prompt_template_path).read_text(encoding="utf-8")
 
@@ -144,7 +150,7 @@ class CoTFilteringPipeline:
             padding=True,
             return_tensors="pt",
         )
-        if self.config.device in {"cpu", "cuda"}:
+        if self.input_device is not None:
             inputs = inputs.to(self.input_device)
 
         generated_ids = self.model.generate(**inputs, max_new_tokens=self.config.max_new_tokens)
@@ -196,6 +202,35 @@ class CoTFilteringPipeline:
         if not isinstance(keywords, list):
             keywords = []
         return [str(x) for x in keywords[:5]]
+
+    @staticmethod
+    def _normalize_parse(parse_obj: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(parse_obj, dict):
+            parse_obj = {}
+
+        raw_entities = parse_obj.get("entities", [])
+        entities: list[Dict[str, Any]] = []
+        if isinstance(raw_entities, list):
+            for ent in raw_entities:
+                if isinstance(ent, dict):
+                    entities.append(ent)
+                elif isinstance(ent, str):
+                    entities.append({"name": ent})
+                else:
+                    entities.append({"name": str(ent)})
+
+        def _as_str_list(key: str) -> list[str]:
+            raw = parse_obj.get(key, [])
+            if not isinstance(raw, list):
+                return []
+            return [str(x) for x in raw]
+
+        return {
+            "entities": entities,
+            "actions": _as_str_list("actions"),
+            "forces": _as_str_list("forces"),
+            "outcomes": _as_str_list("outcomes"),
+        }
 
     def _normalize_positive_checklist(self, positive_checklist: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(positive_checklist, dict):
@@ -311,7 +346,7 @@ class CoTFilteringPipeline:
         )
         out = self._generate(self._messages_with_frames(instruction, sample))
         parsed = self._extract_json(out)
-        return parsed.get("parse", {})
+        return self._normalize_parse(parsed.get("parse", {}))
 
     def run_step2_vision_check(self, sample: SampleRecord, parse_obj: Dict[str, Any]) -> Dict[str, Any]:
         instruction = self._step_instruction(
@@ -322,7 +357,7 @@ class CoTFilteringPipeline:
             self._messages_with_frames(instruction, sample, extra_payload={"current_parse": parse_obj})
         )
         parsed = self._extract_json(out)
-        return parsed.get("parse", parse_obj)
+        return self._normalize_parse(parsed.get("parse", parse_obj))
 
     def run_step3_reason(self, sample: SampleRecord, parse_obj: Dict[str, Any]) -> str:
         instruction = self._step_instruction(
@@ -383,7 +418,7 @@ class CoTFilteringPipeline:
         output_text = self._generate(messages)
         parsed = self._extract_json(output_text)
 
-        parse_obj = ParsedElements(**parsed.get("parse", {}))
+        parse_obj = ParsedElements(**self._normalize_parse(parsed.get("parse", {})))
         positive_checklist, penalty_analysis, score_breakdown, physics_richness = self._populate_step4_scores(parsed)
 
         return CoTResult(

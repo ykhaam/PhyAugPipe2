@@ -11,16 +11,19 @@ Usage:
     --subset_csv data/subsets/local_subset.csv \
     --output_dir outputs/scored_stepwise \
     --gpus 0,1 \
+    [--mode all|step] [--step 1..5] \
     [--model_name Qwen/Qwen2.5-VL-3B-Instruct] \
     [--num_frames 8] [--max_new_tokens 512] \
     [--prompt_template prompts/cot_filtering_prompt.txt] \
     [--device auto] [--device_map auto] [--max_memory_per_gpu 70GiB] \
-    [--python_bin python]
+    [--torch_cuda_alloc_conf expandable_segments:True] \
+    [--stagger_seconds 2] [--python_bin python]
 
 Description:
-  - 입력 CSV를 GPU 개수만큼 균등 분할합니다.
-  - 각 GPU에서 scripts/run_cot_scoring.py를 병렬 실행합니다.
-  - 완료 후 shard 결과를 merged 파일로 합칩니다.
+  - mode=all: Step1~5를 순차 실행(각 step은 멀티GPU shard 병렬), 이전 step JSONL을 다음 step 입력으로 사용.
+  - mode=step: 지정된 step만 실행. step>1이면 이전 step 결과 JSONL을 자동 참조.
+  - 각 step 완료 후 shard 결과를 step 디렉터리에 merge합니다.
+  - GPU 메모리 단편화 완화를 위해 기본 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True를 적용합니다.
 USAGE
 }
 
@@ -35,6 +38,10 @@ DEVICE="auto"
 DEVICE_MAP="auto"
 MAX_MEMORY_PER_GPU=""
 PYTHON_BIN="python"
+MODE="all"
+STEP=""
+STAGGER_SECONDS="2"
+TORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -49,10 +56,29 @@ while [[ $# -gt 0 ]]; do
     --device_map) DEVICE_MAP="$2"; shift 2 ;;
     --max_memory_per_gpu) MAX_MEMORY_PER_GPU="$2"; shift 2 ;;
     --python_bin) PYTHON_BIN="$2"; shift 2 ;;
+    --mode) MODE="$2"; shift 2 ;;
+    --step) STEP="$2"; shift 2 ;;
+    --stagger_seconds) STAGGER_SECONDS="$2"; shift 2 ;;
+    --torch_cuda_alloc_conf) TORCH_CUDA_ALLOC_CONF="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1"; usage; exit 1 ;;
   esac
 done
+
+if [[ "$MODE" != "all" && "$MODE" != "step" ]]; then
+  echo "[ERROR] --mode must be one of: all, step"
+  exit 1
+fi
+if [[ "$MODE" == "step" ]]; then
+  if [[ -z "$STEP" ]]; then
+    echo "[ERROR] --mode step requires --step (1~5)"
+    exit 1
+  fi
+  if ! [[ "$STEP" =~ ^[1-5]$ ]]; then
+    echo "[ERROR] --step must be integer 1~5"
+    exit 1
+  fi
+fi
 
 if [[ -z "$SUBSET_CSV" || -z "$OUTPUT_DIR" ]]; then
   echo "[ERROR] --subset_csv, --output_dir 는 필수입니다."
@@ -95,62 +121,85 @@ for idx in range(num_gpus):
 print(f"[INFO] rows={len(df)} split_done")
 PY
 
-pids=()
-for idx in "${!GPU_ARR[@]}"; do
-  gpu_id="${GPU_ARR[$idx]}"
-  shard_csv="$OUTPUT_DIR/shards/subset.part${idx}.csv"
-  out_csv="$OUTPUT_DIR/shards/scored.part${idx}.csv"
-  out_jsonl="$OUTPUT_DIR/shards/scored.part${idx}.jsonl"
-  log_file="$OUTPUT_DIR/logs/part${idx}.log"
+run_step() {
+  local step="$1"
+  local step_dir="$OUTPUT_DIR/step${step}"
+  local step_shards_dir="$step_dir/shards"
+  local step_logs_dir="$step_dir/logs"
+  mkdir -p "$step_shards_dir" "$step_logs_dir"
 
-  if [[ ! -s "$shard_csv" ]]; then
-    echo "[WARN] shard is empty, skip part${idx}"
-    continue
+  pids=()
+  for idx in "${!GPU_ARR[@]}"; do
+    local gpu_id="${GPU_ARR[$idx]}"
+    local shard_csv="$OUTPUT_DIR/shards/subset.part${idx}.csv"
+    local out_csv="$step_shards_dir/scored.part${idx}.csv"
+    local out_jsonl="$step_shards_dir/scored.part${idx}.jsonl"
+    local log_file="$step_logs_dir/part${idx}.log"
+    local prev_jsonl=""
+    if [[ "$step" -gt 1 ]]; then
+      prev_jsonl="$OUTPUT_DIR/step$((step-1))/shards/scored.part${idx}.jsonl"
+      if [[ ! -f "$prev_jsonl" ]]; then
+        echo "[ERROR] previous step jsonl not found for step${step}, part${idx}: $prev_jsonl"
+        exit 1
+      fi
+    fi
+
+    if [[ ! -s "$shard_csv" ]]; then
+      echo "[WARN] shard is empty, skip part${idx}"
+      continue
+    fi
+
+    echo "[INFO] launch step${step} part${idx} on GPU ${gpu_id}"
+    cmd=(
+      "$PYTHON_BIN" scripts/run_cot_scoring.py
+      --subset_csv "$shard_csv"
+      --output_csv "$out_csv"
+      --output_jsonl "$out_jsonl"
+      --model_name "$MODEL_NAME"
+      --num_frames "$NUM_FRAMES"
+      --max_new_tokens "$MAX_NEW_TOKENS"
+      --prompt_template "$PROMPT_TEMPLATE"
+      --device "$DEVICE"
+      --device_map "$DEVICE_MAP"
+      --start_step "$step"
+      --end_step "$step"
+      --print_step_summary
+    )
+    if [[ -n "$prev_jsonl" ]]; then
+      cmd+=(--input_jsonl "$prev_jsonl")
+    fi
+    if [[ -n "$MAX_MEMORY_PER_GPU" ]]; then
+      cmd+=(--max_memory_per_gpu "$MAX_MEMORY_PER_GPU")
+    fi
+    (
+      export CUDA_VISIBLE_DEVICES="$gpu_id"
+      export PYTORCH_CUDA_ALLOC_CONF="$TORCH_CUDA_ALLOC_CONF"
+      "${cmd[@]}"
+    ) > "$log_file" 2>&1 &
+    pids+=("$!")
+    if [[ "$STAGGER_SECONDS" != "0" ]]; then
+      sleep "$STAGGER_SECONDS"
+    fi
+  done
+
+  if [[ "${#pids[@]}" -eq 0 ]]; then
+    echo "[ERROR] no worker started for step${step}. check shards or --gpus"
+    exit 1
   fi
 
-  echo "[INFO] launch part${idx} on GPU ${gpu_id}"
-  cmd=(
-    "$PYTHON_BIN" scripts/run_cot_scoring.py
-    --subset_csv "$shard_csv"
-    --output_csv "$out_csv"
-    --output_jsonl "$out_jsonl"
-    --model_name "$MODEL_NAME"
-    --num_frames "$NUM_FRAMES"
-    --max_new_tokens "$MAX_NEW_TOKENS"
-    --prompt_template "$PROMPT_TEMPLATE"
-    --device "$DEVICE"
-    --device_map "$DEVICE_MAP"
-    --cuda_visible_devices "$gpu_id"
-    --print_step_summary
-  )
-
-  if [[ -n "$MAX_MEMORY_PER_GPU" ]]; then
-    cmd+=(--max_memory_per_gpu "$MAX_MEMORY_PER_GPU")
+  fail=0
+  for pid in "${pids[@]}"; do
+    if ! wait "$pid"; then
+      fail=1
+    fi
+  done
+  if [[ "$fail" -ne 0 ]]; then
+    echo "[ERROR] one or more workers failed at step${step}. check $step_logs_dir/*.log"
+    exit 1
   fi
 
-  "${cmd[@]}" > "$log_file" 2>&1 &
-  pids+=("$!")
-done
-
-if [[ "${#pids[@]}" -eq 0 ]]; then
-  echo "[ERROR] no worker started. check shards or --gpus"
-  exit 1
-fi
-
-fail=0
-for pid in "${pids[@]}"; do
-  if ! wait "$pid"; then
-    fail=1
-  fi
-done
-
-if [[ "$fail" -ne 0 ]]; then
-  echo "[ERROR] one or more workers failed. check $OUTPUT_DIR/logs/*.log"
-  exit 1
-fi
-
-echo "[INFO] merging shard outputs..."
-"$PYTHON_BIN" - "$OUTPUT_DIR" <<'PY'
+  echo "[INFO] merging shard outputs for step${step}..."
+  "$PYTHON_BIN" - "$step_dir" <<'PY'
 import glob
 import json
 import os
@@ -211,5 +260,22 @@ with open(os.path.join(output_dir, "merge_meta.json"), "w", encoding="utf-8") as
 print("[INFO] merge done")
 print(json.dumps(meta, ensure_ascii=False, indent=2))
 PY
+}
 
-echo "[DONE] outputs in: $OUTPUT_DIR"
+if [[ "$MODE" == "all" ]]; then
+  for step in 1 2 3 4 5; do
+    run_step "$step"
+  done
+  cp "$OUTPUT_DIR/step5/scored_merged.csv" "$OUTPUT_DIR/scored_merged.csv"
+  cp "$OUTPUT_DIR/step5/scored_merged.jsonl" "$OUTPUT_DIR/scored_merged.jsonl"
+  cp "$OUTPUT_DIR/step5/scored_merged.steps.jsonl" "$OUTPUT_DIR/scored_merged.steps.jsonl"
+  echo "[DONE] all steps completed. final outputs in: $OUTPUT_DIR"
+else
+  run_step "$STEP"
+  if [[ "$STEP" == "5" ]]; then
+    cp "$OUTPUT_DIR/step5/scored_merged.csv" "$OUTPUT_DIR/scored_merged.csv"
+    cp "$OUTPUT_DIR/step5/scored_merged.jsonl" "$OUTPUT_DIR/scored_merged.jsonl"
+    cp "$OUTPUT_DIR/step5/scored_merged.steps.jsonl" "$OUTPUT_DIR/scored_merged.steps.jsonl"
+  fi
+  echo "[DONE] step${STEP} completed. outputs in: $OUTPUT_DIR/step${STEP}"
+fi
