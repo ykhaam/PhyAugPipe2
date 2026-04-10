@@ -204,6 +204,29 @@ class CoTFilteringPipeline:
         return [str(x) for x in keywords[:5]]
 
     @staticmethod
+    def _text_has_any(text: str, needles: list[str]) -> bool:
+        lower = text.lower()
+        return any(token in lower for token in needles)
+
+    @staticmethod
+    def _compact_keywords(items: list[str], max_items: int = 5) -> list[str]:
+        out: list[str] = []
+        for item in items:
+            token = str(item).strip()
+            if not token:
+                continue
+            if token not in out:
+                out.append(token)
+            if len(out) >= max_items:
+                break
+        return out
+
+    def _extract_matching_terms(self, text: str, candidates: list[str], max_items: int = 5) -> list[str]:
+        lower = text.lower()
+        hits = [term for term in candidates if term in lower]
+        return self._compact_keywords(hits, max_items=max_items)
+
+    @staticmethod
     def _normalize_parse(parse_obj: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(parse_obj, dict):
             parse_obj = {}
@@ -307,15 +330,91 @@ class CoTFilteringPipeline:
             - 0.05 * penalty_score
         )
 
+    def _apply_step4_consistency_fallbacks(
+        self,
+        positive_checklist: Dict[str, Any],
+        parse_obj: Dict[str, Any],
+        reason: str,
+    ) -> Dict[str, Any]:
+        parse_norm = self._normalize_parse(parse_obj)
+        entities = parse_norm.get("entities", [])
+        actions = parse_norm.get("actions", [])
+        forces = parse_norm.get("forces", [])
+        outcomes = parse_norm.get("outcomes", [])
+
+        if not positive_checklist["interaction_keywords"]:
+            positive_checklist["interaction_keywords"] = self._compact_keywords(
+                [*actions, *self._extract_matching_terms(reason, ["touch", "press", "grip", "push", "pull", "cut", "insert", "rotate"])]
+            )
+        if not positive_checklist["force_keywords"]:
+            positive_checklist["force_keywords"] = self._compact_keywords(
+                [*forces, *self._extract_matching_terms(reason, ["force", "pressure", "friction", "gravity", "magnetic", "attraction", "compression"])]
+            )
+        if not positive_checklist["outcome_keywords"]:
+            positive_checklist["outcome_keywords"] = self._compact_keywords(
+                [*outcomes, *self._extract_matching_terms(reason, ["deform", "rotate", "rearrange", "break", "separate", "form", "written", "inserted"])]
+            )
+        if not positive_checklist["causal_keywords"]:
+            positive_checklist["causal_keywords"] = self._extract_matching_terms(
+                reason,
+                ["causing", "causes", "because", "therefore", "leads to", "results in", "so that"],
+            )
+
+        if positive_checklist["explicit_entity_interaction_present"] and not positive_checklist["interaction_keywords"]:
+            positive_checklist["interaction_keywords"] = ["visible interaction"]
+        if positive_checklist["explicit_force_present"] and not positive_checklist["force_keywords"]:
+            positive_checklist["force_keywords"] = ["visible force"]
+        if positive_checklist["explicit_outcome_present"] and not positive_checklist["outcome_keywords"]:
+            positive_checklist["outcome_keywords"] = ["visible outcome"]
+        if positive_checklist["cause_effect_relation_present"] and not positive_checklist["causal_keywords"]:
+            positive_checklist["causal_keywords"] = ["cause-effect"]
+
+        if not positive_checklist["explicit_entity_interaction_present"] and len(entities) >= 2 and len(actions) > 0:
+            positive_checklist["explicit_entity_interaction_present"] = True
+        if not positive_checklist["explicit_force_present"]:
+            if len(forces) > 0 or self._text_has_any(reason, ["force", "pressure", "friction", "gravity", "magnetic"]):
+                positive_checklist["explicit_force_present"] = True
+        if not positive_checklist["explicit_outcome_present"]:
+            if len(outcomes) > 0 or self._text_has_any(reason, ["deform", "rotate", "rearrange", "break", "separate", "written", "formed"]):
+                positive_checklist["explicit_outcome_present"] = True
+        if not positive_checklist["force_outcome_causally_linked"]:
+            if positive_checklist["explicit_force_present"] and positive_checklist["explicit_outcome_present"] and self._text_has_any(
+                reason, ["causing", "causes", "because", "leads to", "results in"]
+            ):
+                positive_checklist["force_outcome_causally_linked"] = True
+        if not positive_checklist["cause_effect_relation_present"]:
+            positive_checklist["cause_effect_relation_present"] = self._text_has_any(
+                reason, ["causing", "causes", "because", "therefore", "leads to", "results in"]
+            )
+        if not positive_checklist["reason_supported_by_visible_process"]:
+            positive_checklist["reason_supported_by_visible_process"] = len(actions) > 0 and (
+                positive_checklist["explicit_force_present"] or positive_checklist["explicit_outcome_present"]
+            )
+        return positive_checklist
+
     def _populate_step4_scores(
         self,
         parsed: Dict[str, Any],
+        parse_obj: Dict[str, Any],
+        reason: str,
     ) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], float]:
         positive_checklist = self._normalize_positive_checklist(parsed.get("positive_checklist", {}))
+        positive_checklist = self._apply_step4_consistency_fallbacks(positive_checklist, parse_obj=parse_obj, reason=reason)
         penalty_analysis = parsed.get("penalty_analysis", {})
         if not isinstance(penalty_analysis, dict):
             penalty_analysis = {}
         penalty_analysis["penalty_keywords"] = self._keyword_list(penalty_analysis, "penalty_keywords")
+        if not penalty_analysis["penalty_keywords"]:
+            inferred_penalties = []
+            if bool(penalty_analysis.get("camera_motion_dominant", False)):
+                inferred_penalties.append("camera motion")
+            if bool(penalty_analysis.get("stylized_rendering", False)):
+                inferred_penalties.append("stylized rendering")
+            if bool(penalty_analysis.get("static_aftermath", False)):
+                inferred_penalties.append("static aftermath")
+            if bool(penalty_analysis.get("showcase_without_interaction", False)):
+                inferred_penalties.append("showcase")
+            penalty_analysis["penalty_keywords"] = self._compact_keywords(inferred_penalties)
 
         score_breakdown = parsed.get("score_breakdown", {})
         if not isinstance(score_breakdown, dict):
@@ -381,6 +480,7 @@ class CoTFilteringPipeline:
                 "cause_effect_relation_present, multi_step_causality_present, reason_supported_by_visible_process. "
                 "'positive_checklist' must include short keyword lists (<=5 each): interaction_keywords, "
                 "force_keywords, outcome_keywords, causal_keywords. "
+                "If a related boolean is true, provide at least one grounded keyword for that category. "
                 "'penalty_analysis' must include booleans: camera_motion_dominant, stylized_rendering, "
                 "static_aftermath, showcase_without_interaction; plus penalty_keywords (list, <=5 short phrases). "
                 "Do NOT rely on generic motion; verify real object interaction, explicit force/outcome, and grounded visible causal process. "
@@ -395,7 +495,11 @@ class CoTFilteringPipeline:
         payload = {"parse": parse_obj, "reason": reason}
         out = self._generate(self._messages_with_frames(instruction, sample, extra_payload=payload))
         parsed = self._extract_json(out)
-        positive_checklist, penalty_analysis, score_breakdown, physics_richness = self._populate_step4_scores(parsed)
+        positive_checklist, penalty_analysis, score_breakdown, physics_richness = self._populate_step4_scores(
+            parsed,
+            parse_obj=parse_obj,
+            reason=reason,
+        )
         return {
             "positive_checklist": positive_checklist,
             "penalty_analysis": penalty_analysis,
@@ -419,7 +523,11 @@ class CoTFilteringPipeline:
         parsed = self._extract_json(output_text)
 
         parse_obj = ParsedElements(**self._normalize_parse(parsed.get("parse", {})))
-        positive_checklist, penalty_analysis, score_breakdown, physics_richness = self._populate_step4_scores(parsed)
+        positive_checklist, penalty_analysis, score_breakdown, physics_richness = self._populate_step4_scores(
+            parsed,
+            parse_obj=parse_obj.model_dump(),
+            reason=str(parsed.get("reason", "")),
+        )
 
         return CoTResult(
             original=parsed.get("original", sample.original_prompt),
