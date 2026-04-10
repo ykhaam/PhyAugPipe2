@@ -260,7 +260,7 @@ class CoTFilteringPipeline:
             0.30 * entity_interaction_score
             + 0.30 * force_outcome_score
             + 0.30 * causal_clarity_score
-            - 0.10 * penalty_score
+            - 0.05 * penalty_score
         )
 
     def _populate_step4_scores(
