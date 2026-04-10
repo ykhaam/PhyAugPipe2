@@ -166,8 +166,7 @@ python scripts/run_cot_scoring.py \
 
 ## 6) Post-CoT 파이프라인 (Stage B/C/D)
 
-`step4_score.jsonl` 이후 단계는 **후처리(post-processing)** 로 분리되어 있으며, threshold를 코드에 고정하지 않습니다.
-(`step5_extended.jsonl`도 입력 가능하지만, 논문 재현 관점에서는 원문 prompt 기반의 step4 점수 결과를 권장)
+`scored.jsonl` 이후 단계는 **후처리(post-processing)** 로 분리되어 있으며, threshold를 코드에 고정하지 않습니다.
 
 ### Stage B: Threshold Filtering
 
@@ -176,14 +175,14 @@ python scripts/run_cot_scoring.py \
 ```bash
 # 예시 1) fixed threshold
 python scripts/postcot_threshold_filter.py \
-  --input_jsonl outputs/steps/step4_score.jsonl \
+  --input_jsonl outputs/scored/scored.jsonl \
   --output_jsonl outputs/postcot/filtered_t06.jsonl \
   --output_csv outputs/postcot/filtered_t06.csv \
   --threshold 0.6
 
 # 예시 2) top quantile
 python scripts/postcot_threshold_filter.py \
-  --input_jsonl outputs/steps/step4_score.jsonl \
+  --input_jsonl outputs/scored/scored.jsonl \
   --output_jsonl outputs/postcot/filtered_top15.jsonl \
   --output_csv outputs/postcot/filtered_top15.csv \
   --top_quantile 0.15

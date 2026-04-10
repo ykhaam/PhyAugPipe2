@@ -172,7 +172,7 @@ Backward compatibility:
 ## 5) `scripts/postcot_threshold_filter.py` (Stage B)
 
 ### Input
-- `--input_jsonl`: scored JSONL (`step4_score.jsonl` 권장, `step5_extended.jsonl`도 가능)
+- `--input_jsonl`: scored JSONL (`run_cot_scoring.py`의 `--output_jsonl`, 예: `outputs/scored/scored.jsonl`)
 - filtering mode (exactly one):
   - `--threshold <float>`: `physics_richness >= threshold`
   - `--top_quantile <float>`: top q fraction by `physics_richness`
@@ -193,8 +193,8 @@ Backward compatibility:
 - optional:
   - `--categories_file`: newline-separated category list
   - `--prompt_field`: `original_prompt` or `extended` (default: `original_prompt`)
-    - `step4_score.jsonl` 기반이면 `original_prompt` 사용 권장
-    - `step5_extended.jsonl` 기반 실험 시 `extended` 선택 가능
+    - 기본 `scored.jsonl`에서는 `original_prompt` 사용 권장
+    - 확장 프롬프트 실험 데이터가 있으면 `extended` 선택 가능
   - `--model_name`: sentence-transformer model name
   - `--batch_size`
   - `--low_margin_threshold` (default: `0.05`)
