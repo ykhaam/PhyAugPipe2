@@ -183,6 +183,31 @@ python scripts/run_cot_scoring.py \
 ---
 
 
+### Stepwise + Multi-GPU 일괄 실행 (권장, `run_cot_stepwise_all.sh`)
+
+`run_cot_scoring.py` 단일 실행이 불안정할 때는 아래 스크립트로 **CSV를 GPU 수만큼 자동 분할**해서 병렬 실행하세요.
+각 shard의 결과를 마지막에 자동 merge합니다.
+
+```bash
+bash scripts/run_cot_stepwise_all.sh \
+  --subset_csv data/subsets/local_subset.csv \
+  --output_dir outputs/scored_stepwise \
+  --gpus 0,1,2,3 \
+  --model_name Qwen/Qwen2.5-VL-3B-Instruct \
+  --num_frames 8 \
+  --max_new_tokens 512 \
+  --device auto \
+  --device_map auto \
+  --max_memory_per_gpu 70GiB
+```
+
+주요 출력:
+- `outputs/scored_stepwise/scored_merged.csv`
+- `outputs/scored_stepwise/scored_merged.jsonl`
+- `outputs/scored_stepwise/scored_merged.steps.jsonl`
+- shard 로그: `outputs/scored_stepwise/logs/part*.log`
+
+
 ## 6) Post-CoT 파이프라인 (Stage B/C/D)
 
 `scored.jsonl` 이후 단계는 **후처리(post-processing)** 로 분리되어 있으며, threshold를 코드에 고정하지 않습니다.
