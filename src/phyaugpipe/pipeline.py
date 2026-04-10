@@ -121,7 +121,13 @@ class CoTFilteringPipeline:
                 trust_remote_code=True,
                 **extra_kwargs,
             )
-            self.input_device = self.model.device
+            # NOTE:
+            #   When device_map="auto", `self.model.device` can be `cpu` even if the
+            #   executable blocks are dispatched to CUDA devices. In that case feeding
+            #   CPU tensors can trigger mixed-device errors at generation time
+            #   (e.g. index_select between cuda:0 and cpu).
+            #   Use the first parameter device as generation input device.
+            self.input_device = next(self.model.parameters()).device
 
         self.template = Path(self.config.prompt_template_path).read_text(encoding="utf-8")
 
@@ -144,7 +150,7 @@ class CoTFilteringPipeline:
             padding=True,
             return_tensors="pt",
         )
-        if self.config.device in {"cpu", "cuda"}:
+        if self.input_device is not None:
             inputs = inputs.to(self.input_device)
 
         generated_ids = self.model.generate(**inputs, max_new_tokens=self.config.max_new_tokens)
