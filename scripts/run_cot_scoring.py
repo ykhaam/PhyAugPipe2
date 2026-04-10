@@ -251,7 +251,7 @@ def main() -> None:
 
                 result = CoTResult(
                     original=sample.original_prompt,
-                    parse=ParsedElements(**parse_step2),
+                    parse=ParsedElements(**pipe._normalize_parse(parse_step2)),
                     reason=reason_step3,
                     extended=extended_step5,
                     physics_richness=float(step4.get("physics_richness", 0.0)),

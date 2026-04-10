@@ -161,7 +161,6 @@ run_step() {
       --prompt_template "$PROMPT_TEMPLATE"
       --device "$DEVICE"
       --device_map "$DEVICE_MAP"
-      --cuda_visible_devices "$gpu_id"
       --start_step "$step"
       --end_step "$step"
       --print_step_summary
@@ -181,8 +180,6 @@ run_step() {
     if [[ "$STAGGER_SECONDS" != "0" ]]; then
       sleep "$STAGGER_SECONDS"
     fi
-    "${cmd[@]}" > "$log_file" 2>&1 &
-    pids+=("$!")
   done
 
   if [[ "${#pids[@]}" -eq 0 ]]; then
