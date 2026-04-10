@@ -7,14 +7,17 @@ Rules:
 - Extract entities (with material when visible), actions, physical forces, outcomes.
 - Include all agents from prompt+frames.
 - Do not add speculative entities or interactions.
+- Save results into the dictionary parse. 
 
 2) Step 2 Vision Checking:
 - Verify parsed elements against frames and original prompt.
 - Remove hallucinated elements.
 - Add missing clearly visible entities/interactions.
+- Update parse accordingly. 
 
 3) Step 3 Physics Reasoning:
-- Explain causal physical interactions concisely.
+- Produce a concise explanation describing how the parsed entities interact through physical forces and lead to observed outcomes.
+- Store the explanation as reason. 
 
 4) Step 4 Data Scoring:
 - Use BOTH original prompt text and sampled video frames.
