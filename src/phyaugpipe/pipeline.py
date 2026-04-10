@@ -25,6 +25,8 @@ class PipelineConfig:
     num_frames: int = 8
     prompt_template_path: str = "prompts/cot_filtering_prompt.txt"
     device: str = "auto"  # auto | cpu | cuda
+    device_map: str = "auto"
+    max_memory_per_gpu: str = ""
 
 
 
@@ -107,10 +109,17 @@ class CoTFilteringPipeline:
             self.model.to("cuda")
             self.input_device = torch.device("cuda")
         else:
+            extra_kwargs: Dict[str, Any] = {"device_map": self.config.device_map}
+            if self.config.max_memory_per_gpu and torch.cuda.is_available():
+                gpu_count = torch.cuda.device_count()
+                if gpu_count > 0:
+                    extra_kwargs["max_memory"] = {
+                        idx: self.config.max_memory_per_gpu for idx in range(gpu_count)
+                    }
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 self.config.model_name,
                 trust_remote_code=True,
-                device_map="auto",
+                **extra_kwargs,
             )
             self.input_device = self.model.device
 
@@ -163,13 +172,6 @@ class CoTFilteringPipeline:
             content.append({"type": "text", "text": json.dumps(extra_payload, ensure_ascii=False)})
         for frame in frames:
             content.append({"type": "image", "image": frame})
-        return [{"role": "user", "content": content}]
-
-    def _messages_text_only(self, instruction: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        content = [
-            {"type": "text", "text": instruction},
-            {"type": "text", "text": json.dumps(payload, ensure_ascii=False)},
-        ]
         return [{"role": "user", "content": content}]
 
     @staticmethod
@@ -267,7 +269,7 @@ class CoTFilteringPipeline:
             0.30 * entity_interaction_score
             + 0.30 * force_outcome_score
             + 0.30 * causal_clarity_score
-            - 0.10 * penalty_score
+            - 0.05 * penalty_score
         )
 
     def _populate_step4_scores(
