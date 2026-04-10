@@ -16,12 +16,14 @@ Usage:
     [--num_frames 8] [--max_new_tokens 512] \
     [--prompt_template prompts/cot_filtering_prompt.txt] \
     [--device auto] [--device_map auto] [--max_memory_per_gpu 70GiB] \
-    [--python_bin python]
+    [--torch_cuda_alloc_conf expandable_segments:True] \
+    [--stagger_seconds 2] [--python_bin python]
 
 Description:
   - mode=all: Step1~5를 순차 실행(각 step은 멀티GPU shard 병렬), 이전 step JSONL을 다음 step 입력으로 사용.
   - mode=step: 지정된 step만 실행. step>1이면 이전 step 결과 JSONL을 자동 참조.
   - 각 step 완료 후 shard 결과를 step 디렉터리에 merge합니다.
+  - GPU 메모리 단편화 완화를 위해 기본 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True를 적용합니다.
 USAGE
 }
 
@@ -38,6 +40,8 @@ MAX_MEMORY_PER_GPU=""
 PYTHON_BIN="python"
 MODE="all"
 STEP=""
+STAGGER_SECONDS="2"
+TORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +58,8 @@ while [[ $# -gt 0 ]]; do
     --python_bin) PYTHON_BIN="$2"; shift 2 ;;
     --mode) MODE="$2"; shift 2 ;;
     --step) STEP="$2"; shift 2 ;;
+    --stagger_seconds) STAGGER_SECONDS="$2"; shift 2 ;;
+    --torch_cuda_alloc_conf) TORCH_CUDA_ALLOC_CONF="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1"; usage; exit 1 ;;
   esac
@@ -165,6 +171,15 @@ run_step() {
     fi
     if [[ -n "$MAX_MEMORY_PER_GPU" ]]; then
       cmd+=(--max_memory_per_gpu "$MAX_MEMORY_PER_GPU")
+    fi
+    (
+      export CUDA_VISIBLE_DEVICES="$gpu_id"
+      export PYTORCH_CUDA_ALLOC_CONF="$TORCH_CUDA_ALLOC_CONF"
+      "${cmd[@]}"
+    ) > "$log_file" 2>&1 &
+    pids+=("$!")
+    if [[ "$STAGGER_SECONDS" != "0" ]]; then
+      sleep "$STAGGER_SECONDS"
     fi
     "${cmd[@]}" > "$log_file" 2>&1 &
     pids+=("$!")
