@@ -12,13 +12,10 @@ if str(SRC_DIR) not in sys.path:
 import argparse
 import csv
 import json
+import os
 
 import pandas as pd
 from tqdm import tqdm
-
-from phyaugpipe.pipeline import CoTFilteringPipeline, PipelineConfig
-from phyaugpipe.schemas import SampleRecord
-
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run CoT filtering/scoring (Algorithm 1 steps 1~5)")
@@ -30,12 +27,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max_new_tokens", type=int, default=512)
     p.add_argument("--prompt_template", default="prompts/cot_filtering_prompt.txt")
     p.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    p.add_argument("--device_map", default="auto", help="transformers device_map (used when --device auto)")
+    p.add_argument("--max_memory_per_gpu", default="", help="e.g. 70GiB; used when --device auto")
+    p.add_argument("--cuda_visible_devices", default="", help="e.g. 0,1,2,3")
     p.add_argument("--max_samples", type=int, default=0, help="0 means all rows")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.cuda_visible_devices:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
+
+    from phyaugpipe.pipeline import CoTFilteringPipeline, PipelineConfig
+    from phyaugpipe.schemas import SampleRecord
+
     df = pd.read_csv(args.subset_csv)
     if args.max_samples > 0:
         df = df.head(args.max_samples)
@@ -47,6 +53,8 @@ def main() -> None:
             max_new_tokens=args.max_new_tokens,
             prompt_template_path=args.prompt_template,
             device=args.device,
+            device_map=args.device_map,
+            max_memory_per_gpu=args.max_memory_per_gpu,
         )
     )
 

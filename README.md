@@ -161,6 +161,25 @@ python scripts/run_cot_scoring.py \
   --max_new_tokens 512
 ```
 
+### Multi-GPU 실행 예시
+
+아래처럼 GPU를 여러 장 지정하고 `--device auto --device_map auto`를 사용하면
+`transformers`의 device map 분산 로딩으로 멀티 GPU 실행이 가능합니다.
+
+```bash
+python scripts/run_cot_scoring.py \
+  --subset_csv data/subsets/local_subset.csv \
+  --output_csv outputs/scored/scored_mgpu.csv \
+  --output_jsonl outputs/scored/scored_mgpu.jsonl \
+  --model_name Qwen/Qwen2.5-VL-3B-Instruct \
+  --num_frames 8 \
+  --max_new_tokens 512 \
+  --device auto \
+  --cuda_visible_devices 0,1 \
+  --device_map auto \
+  --max_memory_per_gpu 70GiB
+```
+
 ---
 
 

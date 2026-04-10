@@ -141,6 +141,10 @@
 ### Input
 - `--subset_csv`: canonical pair CSV
 - model/runtime args: `--model_name`, `--num_frames`, `--max_new_tokens`, `--device`
+- multi-GPU optional args:
+  - `--cuda_visible_devices` (예: `0,1`)
+  - `--device_map` (default: `auto`)
+  - `--max_memory_per_gpu` (예: `70GiB`)
 
 ### Outputs
 1. `--output_csv`
