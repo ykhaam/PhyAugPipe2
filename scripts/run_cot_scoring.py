@@ -77,7 +77,6 @@ def main() -> None:
                 sample_id=str(row["sample_id"]),
                 original_prompt=str(row["original_prompt"]),
                 video_path=str(row["video_path"]),
-                metadata={k: v for k, v in row.items() if k not in {"sample_id", "original_prompt", "video_path"}},
             )
             try:
                 result = pipe.run_one(sample)

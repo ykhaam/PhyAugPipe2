@@ -165,13 +165,6 @@ class CoTFilteringPipeline:
             content.append({"type": "image", "image": frame})
         return [{"role": "user", "content": content}]
 
-    def _messages_text_only(self, instruction: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        content = [
-            {"type": "text", "text": instruction},
-            {"type": "text", "text": json.dumps(payload, ensure_ascii=False)},
-        ]
-        return [{"role": "user", "content": content}]
-
     @staticmethod
     def _clamp01(value: float) -> float:
         return max(0.0, min(1.0, float(value)))
@@ -267,7 +260,7 @@ class CoTFilteringPipeline:
             0.30 * entity_interaction_score
             + 0.30 * force_outcome_score
             + 0.30 * causal_clarity_score
-            - 0.10 * penalty_score
+            - 0.05 * penalty_score
         )
 
     def _populate_step4_scores(
